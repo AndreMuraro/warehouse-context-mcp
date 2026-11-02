@@ -1,14 +1,13 @@
 """Build a small, fully synthetic shipping warehouse for demos and tests.
 
-Usage: python examples/build_demo.py examples/demo.duckdb
+Usage: uv run examples/build_demo.py examples/demo.duckdb
 Every value is generated from a fixed seed; no real vessels, companies or people.
 """
-
-from __future__ import annotations
 
 import random
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import duckdb
 
@@ -16,10 +15,10 @@ PORTS = ["Rotterdam", "Singapore", "Houston", "Santos", "Fujairah", "Ningbo", "A
 CLASSES = ["VLCC", "Suezmax", "Aframax", "LR2", "MR"]
 
 
-def build(path: str, now: datetime | None = None) -> None:
+def build(path: Path, now: datetime | None = None) -> None:
     rng = random.Random(42)
-    now = now or datetime(2026, 11, 1, 12, 0, 0)
-    con = duckdb.connect(path)
+    now = now or datetime(2026, 11, 1, 12, 0, 0)  # noqa: DTZ001  naive UTC, like most warehouses
+    con = duckdb.connect(str(path))
     for t in ["fct_voyage_economics", "stg_voyages", "dim_vessels", "dim_charterers"]:
         con.execute(f"drop table if exists {t}")
 
@@ -89,4 +88,4 @@ def build(path: str, now: datetime | None = None) -> None:
 
 
 if __name__ == "__main__":
-    build(sys.argv[1] if len(sys.argv) > 1 else "examples/demo.duckdb")
+    build(Path(sys.argv[1] if len(sys.argv) > 1 else "examples/demo.duckdb"))

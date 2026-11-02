@@ -9,11 +9,11 @@ tables:
     freshness_column: updated_at
     expected_freshness_hours: 24
     columns:
-      vessel_id: { description: Surrogate key. }
-      vessel_name: { description: Registered vessel name. }
+      vessel_id: { description: "Surrogate key." }
+      vessel_name: { description: "Registered vessel name." }
       vessel_class: { description: "Size class: VLCC, Suezmax, Aframax, LR2 or MR." }
-      dwt_tonnes: { description: Deadweight tonnage in metric tonnes. }
-      built_year: { description: Year of delivery from the shipyard. }
+      dwt_tonnes: { description: "Deadweight tonnage in metric tonnes." }
+      built_year: { description: "Year of delivery from the shipyard." }
 
   dim_charterers:
     description: Companies that charter vessels. Contact details are personal data.
@@ -22,10 +22,10 @@ tables:
     freshness_column: updated_at
     expected_freshness_hours: 168
     columns:
-      charterer_id: { description: Surrogate key. }
-      charterer_name: { description: Legal entity name. }
-      contact_email: { description: Operations contact. Personal data., pii: true }
-      country: { description: ISO 3166-1 alpha-2 country of the legal entity. }
+      charterer_id: { description: "Surrogate key." }
+      charterer_name: { description: "Legal entity name." }
+      contact_email: { description: "Operations contact. Personal data.", pii: true }
+      country: { description: "ISO 3166-1 alpha-2 country of the legal entity." }
 
   stg_voyages:
     description: Voyages as received from the fixtures system, lightly cleaned.
@@ -35,9 +35,9 @@ tables:
     freshness_column: loaded_at
     expected_freshness_hours: 12
     columns:
-      voyage_id: { description: Fixture identifier. }
-      laycan_start: { description: First day of the loading window. }
-      cargo_tonnes: { description: Contracted cargo quantity in metric tonnes. }
+      voyage_id: { description: "Fixture identifier." }
+      laycan_start: { description: "First day of the loading window." }
+      cargo_tonnes: { description: "Contracted cargo quantity in metric tonnes." }
 
   fct_voyage_economics:
     description: >
@@ -49,7 +49,7 @@ tables:
     freshness_column: computed_at
     expected_freshness_hours: 12
     columns:
-      revenue_usd: { description: Freight revenue in USD. }
-      voyage_costs_usd: { description: Bunkers, port costs and canal dues in USD. }
-      duration_days: { description: Days from load port arrival to discharge completion. }
-      tce_usd_per_day: { description: Time-charter equivalent in USD per day. }
+      revenue_usd: { description: "Freight revenue in USD." }
+      voyage_costs_usd: { description: "Bunkers, port costs and canal dues in USD." }
+      duration_days: { description: "Days from load port arrival to discharge completion." }
+      tce_usd_per_day: { description: "Time-charter equivalent in USD per day." }

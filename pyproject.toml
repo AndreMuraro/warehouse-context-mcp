@@ -1,51 +1,134 @@
 [project]
 name = "warehouse-context-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "An MCP server that gives AI agents trustworthy, governed context about a data warehouse: docs, lineage, freshness, and read-only queries with guardrails."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "André Muraro" }]
-requires-python = ">=3.11"
+requires-python = ">=3.14"
+keywords = ["mcp", "data-warehouse", "snowflake", "databricks", "duckdb", "ai-agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Topic :: Database",
+    "Typing :: Typed",
+]
 dependencies = [
+    "duckdb>=1.4",
     "mcp>=2,<3",
-    "duckdb>=1.0",
-    "sqlglot>=25",
-    "pyyaml>=6",
-    "pydantic>=2.6",
+    "pydantic>=2.12",
+    "pydantic-settings>=2.11",
+    "pyyaml>=6.0.3",
+    "sqlglot>=30",
 ]
 
 [project.optional-dependencies]
-snowflake = ["snowflake-connector-python>=3.12"]
-databricks = ["databricks-sql-connector>=3.4"]
-dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10", "types-PyYAML"]
+# Snowflake publishes no Python 3.15 wheels yet and its source build fails there.
+snowflake = ["snowflake-connector-python>=4; python_version < '3.15'"]
+databricks = ["databricks-sql-connector>=4.1"]
 
 [project.scripts]
-warehouse-context-mcp = "warehouse_context_mcp.server:main"
+warehouse-context-mcp = "warehouse_context_mcp.cli:main"
+
+[project.urls]
+Repository = "https://github.com/AndreMuraro/warehouse-context-mcp"
+
+[dependency-groups]
+dev = [
+    "pytest>=9",
+    "pytest-cov>=7",
+    "ruff>=0.17",
+    "ty>=0.0.90",
+    "types-pyyaml>=6.0.12",
+]
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["uv_build>=0.13,<0.14"]
+build-backend = "uv_build"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/warehouse_context_mcp"]
+[tool.uv]
+default-groups = ["dev"]
+
+# --- lint and format --------------------------------------------------------------------
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py314"
+src = ["src", "tests", "examples"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+select = ["ALL"]
+ignore = [
+    "D1",      # docstrings where they add something, not on every public name
+    "D203",    # conflicts with D211
+    "D213",    # conflicts with D212
+    "COM812",  # handled by the formatter
+    "TRY003",  # short messages next to the raise read fine
+    "FIX",     # TODOs are tracked as issues
+    "TD",
+    "CPY",     # no per-file copyright headers
+    "TC001",   # Python 3.14 evaluates annotations lazily (PEP 649), so typing-only imports
+    "TC002",   # cost nothing at runtime; keeping them at the top reads better than
+    "TC003",   # TYPE_CHECKING blocks, and pydantic needs most of them at runtime anyway.
+]
 
-[tool.mypy]
-python_version = "3.11"
-strict = true
-files = ["src"]
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004", "SLF001", "INP001", "D"]
+"examples/**" = ["INP001", "T201", "S311", "D"]
+"scripts/**" = ["INP001", "T201", "D"]
 
-[[tool.mypy.overrides]]
-module = ["snowflake.*", "databricks.*"]
-ignore_missing_imports = true
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
-[tool.pytest.ini_options]
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = ["pydantic.BaseModel", "pydantic_settings.BaseSettings"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+# --- types ----------------------------------------------------------------------------
+
+[tool.ty.environment]
+python-version = "3.14"
+extra-paths = ["examples"]
+
+[tool.ty.src]
+include = ["src", "tests", "examples", "scripts"]
+
+[tool.ty.rules]
+# Fail on anything ty is unsure about, not only definite errors.
+possibly-unresolved-reference = "error"
+possibly-missing-attribute = "error"
+possibly-missing-import = "error"
+redundant-cast = "error"
+unused-ignore-comment = "error"
+deprecated = "error"
+
+[[tool.ty.overrides]]
+# The warehouse drivers ship without type information; their use is confined to one
+# connect() function per adapter, behind the typed Connection protocol.
+include = ["src/warehouse_context_mcp/warehouses/snowflake.py", "src/warehouse_context_mcp/warehouses/databricks.py"]
+rules = { unresolved-import = "ignore" }
+
+# --- tests ----------------------------------------------------------------------------
+
+[tool.pytest]
+minversion = "9.0"
 testpaths = ["tests"]
+pythonpath = ["examples"]
+addopts = ["--strict-markers", "--strict-config", "-ra"]
 markers = ["live: needs real warehouse credentials in the environment"]
-pythonpath = ["src"]
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["warehouse_context_mcp"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "\\.\\.\\."]

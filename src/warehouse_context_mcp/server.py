@@ -1,98 +1,70 @@
-"""MCP transport: exposes WarehouseContext as tools over stdio."""
+"""MCP transport: a thin layer exposing :class:`WarehouseContext` as read-only tools.
 
-from __future__ import annotations
+Tool arguments are validated by their annotations before the service sees them, and every
+tool returns a typed model, so clients get a JSON schema for each result.
+"""
 
-import argparse
-from typing import Any
+from typing import Annotated
 
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
+from pydantic import Field
 
-from .adapters import (
-    DatabricksWarehouse,
-    DuckDBWarehouse,
-    SnowflakeWarehouse,
-    Warehouse,
-    load_env_file,
-)
-from .catalog import Catalog
-from .context import Limits, WarehouseContext
+from .domain.models import Freshness, Lineage, QueryResult, TableDescription, TableSummary
+from .service import WarehouseContext
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=False)
 
+INSTRUCTIONS = (
+    "Governed context about a data warehouse. Call list_tables and describe_table before "
+    "writing SQL; prefer tables with an owner and fresh data. Query refusals explain how "
+    "to fix the query."
+)
+
+type TableName = Annotated[str, Field(min_length=1, max_length=255, description="Table name")]
+
 
 def build_server(ctx: WarehouseContext) -> MCPServer:
-    mcp = MCPServer(
-        "warehouse-context",
-        instructions=(
-            "Governed context about a data warehouse. Call list_tables and describe_table "
-            "before writing SQL; prefer tables with an owner and fresh data."
-        ),
-    )
+    mcp = MCPServer("warehouse-context", instructions=INSTRUCTIONS)
 
     @mcp.tool(annotations=READ_ONLY)
-    def list_tables() -> list[dict[str, Any]]:
+    def list_tables() -> list[TableSummary]:
         """List warehouse tables with their documented purpose and owner."""
         return ctx.list_tables()
 
     @mcp.tool(annotations=READ_ONLY)
-    def describe_table(table: str) -> dict[str, Any]:
+    def describe_table(table: TableName) -> TableDescription:
         """Columns, types, documentation, PII flags, grain and row count for one table.
-        Call this before writing SQL against a table."""
+
+        Call this before writing SQL against a table.
+        """
         return ctx.describe_table(table)
 
     @mcp.tool(annotations=READ_ONLY)
-    def table_lineage(table: str, depth: int = 3) -> dict[str, Any]:
+    def table_lineage(table: TableName, depth: Annotated[int, Field(ge=1, le=5)] = 3) -> Lineage:
         """Upstream sources and downstream consumers of a table, from the curated catalog."""
-        return ctx.lineage(table, depth=max(1, min(depth, 5)))
+        return ctx.lineage(table, depth=depth)
 
     @mcp.tool(annotations=READ_ONLY)
-    def table_freshness(table: str) -> dict[str, Any]:
+    def table_freshness(table: TableName) -> Freshness:
         """When the table was last updated and whether that meets its documented expectation."""
         return ctx.freshness(table)
 
     @mcp.tool(annotations=READ_ONLY)
-    def sample_rows(table: str, n: int = 5) -> dict[str, Any]:
+    def sample_rows(table: TableName, n: Annotated[int, Field(ge=1, le=20)] = 5) -> QueryResult:
         """A few example rows, with PII columns masked."""
         return ctx.sample_rows(table, n)
 
     @mcp.tool(annotations=READ_ONLY)
-    def run_query(sql: str, max_rows: int = 100) -> dict[str, Any]:
-        """Run ONE read-only SELECT. Writes, DDL and multiple statements are rejected,
-        a row limit is always applied, and PII columns can only be counted, never read."""
+    def run_query(
+        sql: Annotated[str, Field(min_length=1, max_length=20_000)],
+        max_rows: Annotated[int, Field(ge=1, le=1_000)] = 100,
+    ) -> QueryResult:
+        """Run ONE read-only SELECT against the configured schema.
+
+        Writes, DDL and multiple statements are refused, a row limit is always applied,
+        and PII columns can only be counted, never read.
+        """
         return ctx.query(sql, max_rows=max_rows)
 
     return mcp
-
-
-def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="warehouse-context-mcp")
-    parser.add_argument(
-        "--backend",
-        choices=["duckdb", "snowflake", "databricks"],
-        default="duckdb",
-        help="snowflake and databricks read connection settings from environment variables",
-    )
-    parser.add_argument("--duckdb", help="path to a DuckDB database file (duckdb backend)")
-    parser.add_argument("--catalog", help="path to the curated catalog YAML file")
-    parser.add_argument("--max-rows", type=int, default=200)
-    parser.add_argument("--env-file", default=".env", help="optional KEY=VALUE file to load")
-    args = parser.parse_args(argv)
-    load_env_file(args.env_file)
-
-    warehouse: Warehouse
-    if args.backend == "snowflake":
-        warehouse = SnowflakeWarehouse.from_env()
-    elif args.backend == "databricks":
-        warehouse = DatabricksWarehouse.from_env()
-    else:
-        if not args.duckdb:
-            parser.error("--duckdb is required for the duckdb backend")
-        warehouse = DuckDBWarehouse(args.duckdb)
-
-    ctx = WarehouseContext(warehouse, Catalog.load(args.catalog), Limits(max_rows=args.max_rows))
-    build_server(ctx).run()
-
-
-if __name__ == "__main__":
-    main()

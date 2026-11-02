@@ -33,7 +33,7 @@ Read-only is enforced in **three independent layers**, each tested on its own:
 2. **Read-only connection.** DuckDB opens the file read-only; Snowflake and Databricks connect with a SELECT-only role or principal, so a guardrail bug still cannot write.
 3. **Bounded results.** A row limit is always applied (tightened if the query asks for more) and queries are interrupted after a timeout.
 
-**Scope**: queries may only touch tables in the configured schema; anything qualified with another database or schema is refused.
+**Scope**: queries may only touch tables in the configured schema. Anything qualified with another database or schema is refused, and unqualified names are rewritten to fully qualified ones, so a query never depends on the session's default schema.
 
 **PII**: columns flagged `pii: true` in the catalog can be counted (`COUNT(DISTINCT email)`) but never read, filtered on or grouped by, including through aliases and subqueries. `SELECT *` is allowed; PII values come back masked.
 
@@ -41,16 +41,18 @@ See [docs/adr/0001-read-only-by-construction.md](docs/adr/0001-read-only-by-cons
 
 ## Quick start
 
+Requires [uv](https://docs.astral.sh/uv/) and Python 3.14 or 3.15 (uv installs it if missing).
+
 ```bash
-pip install -e ".[dev]"
-python examples/build_demo.py examples/demo.duckdb      # fully synthetic shipping data
-pytest
+uv sync                                         # creates .venv from uv.lock
+uv run examples/build_demo.py examples/demo.duckdb   # fully synthetic shipping data
+uv run pytest
 ```
 
 Connect it to Claude Code:
 
 ```bash
-claude mcp add warehouse -- warehouse-context-mcp \
+claude mcp add warehouse -- uv run --directory "$PWD" warehouse-context-mcp \
   --duckdb examples/demo.duckdb --catalog examples/catalog.yaml
 ```
 
@@ -59,25 +61,31 @@ Then ask: *"Which vessel class had the best average TCE last quarter, and is tha
 ### Snowflake or Databricks
 
 ```bash
-pip install -e ".[snowflake]"            # or ".[databricks]"
+uv sync --extra snowflake                # or --extra databricks, or --all-extras
 cp .env.example .env                     # fill in your own values; .env is git-ignored
 # run examples/snowflake_demo.sql (or databricks_demo.sql) once in the warehouse
-claude mcp add warehouse -- warehouse-context-mcp --backend snowflake --catalog examples/catalog.yaml
+uv run warehouse-context-mcp --backend snowflake --catalog examples/catalog.yaml
 ```
 
-Live tests (skipped unless credentials are set): `WCM_LIVE=snowflake pytest -m live`. The server and the live tests read `./.env` automatically; variables already set in the environment win.
+Settings come from `SNOWFLAKE_*` / `DATABRICKS_*` environment variables or `./.env`; real environment variables win, and blank values count as unset. Key-pair auth for Snowflake: `uv run scripts/snowflake_keypair.py` prints the one `ALTER USER` statement to run.
 
-On Windows (PowerShell):
+Live tests run the demo expectations against a real warehouse and are skipped otherwise:
 
-```powershell
-py -3.12 -m venv .venv; .\.venv\Scripts\Activate.ps1
-pip install -e ".[snowflake,databricks,dev]"
-python scripts/snowflake_keypair.py          # optional: key-pair auth, prints the ALTER USER to run once
-$env:WCM_LIVE = "snowflake"; pytest -m live -q
-$env:WCM_LIVE = "databricks"; pytest -m live -q
+```bash
+WCM_LIVE=snowflake uv run pytest -m live
 ```
 
-On the Databricks Free Edition the personal access token belongs to the workspace admin, so the read-only connection layer is not available there; the parsing and limit guardrails still apply. In a real workspace, use a service principal with only `USE` and `SELECT` grants.
+On Windows the same commands work in PowerShell; set the variable with `$env:WCM_LIVE = "snowflake"`.
+
+On the Databricks Free Edition the personal access token belongs to the workspace admin, so the read-only connection layer is not available there; the query policy still applies. In a real workspace, use a service principal with only `USE` and `SELECT` grants.
+
+### Python versions
+
+| | 3.14 | 3.15 |
+| --- | --- | --- |
+| Core, DuckDB | ✓ | ✓ |
+| Databricks extra | ✓ | ✓ (lz4 and thrift build from source) |
+| Snowflake extra | ✓ | not yet: no 3.15 wheels, and the source build fails; the extra is skipped by an environment marker |
 
 ## The catalog
 
@@ -98,19 +106,46 @@ tables:
 
 In production it would be generated from dbt docs, Unity Catalog comments or a data catalog.
 
+## Architecture
+
+```
+src/warehouse_context_mcp/
+├── domain/        catalog, result models, namespace, errors (no I/O beyond YAML)
+├── guardrails/    QueryPolicy: parse, scope, PII rules, row limit; result masking
+├── warehouses/    Warehouse protocol + DuckDB, Snowflake, Databricks adapters
+├── service.py     WarehouseContext: combines the three; no MCP dependency
+├── server.py      MCP transport: six read-only tools with typed inputs and outputs
+├── settings.py    pydantic-settings for connection config and secrets
+└── cli.py         entry point
+```
+
+Dependencies point inwards: the transport knows the service, the service knows the domain, guardrails and the `Warehouse` protocol, and nothing in the domain knows about MCP or any driver.
+
+- **Typed end to end.** Tool results are frozen pydantic models, so MCP clients receive a JSON schema for every output. Tool arguments carry their bounds (`depth` 1–5, `max_rows` ≤ 1000) in the input schema. DB-API drivers are reached through a `Cursor[P]` protocol generic over the driver's paramstyle, so binding positional parameters to a named-style driver is a type error.
+- **Errors as data.** Guardrail refusals come back as `{"ok": false, "error": ...}` so the agent can repair its query; programming errors and unknown tables raise.
+- **Warehouse-agnostic core.** Adapters only describe where metadata lives; fetching, caching, allow-listing and catalog assembly are shared in `DbApiWarehouse`.
+
+See [docs/adr](docs/adr) for the decisions behind the guardrails and the toolchain.
+
+## Development
+
+```bash
+uv run ruff format          # format
+uv run ruff check           # lint: every ruff rule, with a short documented ignore list
+uv run ty check             # type check, strict rules
+uv run pytest --cov         # tests with branch coverage
+```
+
+CI runs the same on Python 3.14 and 3.15 (Linux) and 3.14 (Windows), and builds and smoke-tests the wheel.
+
 ## Roadmap
 
 - [x] v0.1: DuckDB adapter, catalog, six tools, three-layer guardrails, tests, CI
 - [x] v0.2: Snowflake and Databricks Unity Catalog adapters, native comments and PII tags, schema scoping
+- [x] v0.3: Python 3.14+, uv, ruff and ty; layered package; typed tool inputs and outputs; table names qualified by the policy
 - [ ] Catalog import from dbt `manifest.json`
 - [ ] Evaluation: 20 analyst questions answered with and without the server, scored for correctness and table choice
 - [ ] Per-tool audit log
-
-## Design notes
-
-- `context.py` holds all behaviour and has no MCP dependency; `server.py` is a thin transport. The service layer is tested directly.
-- Errors from guardrails are returned to the agent as data (`{"ok": false, "error": ...}`) so it can repair its query instead of failing the call.
-- The demo warehouse is synthetic and generated from a fixed seed.
 
 ## License
 

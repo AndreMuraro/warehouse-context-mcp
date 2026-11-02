@@ -1,13 +1,15 @@
+# /// script
+# requires-python = ">=3.14"
+# dependencies = ["cryptography>=45"]
+# ///
 """Create an RSA key pair for Snowflake key-pair authentication. Works on Windows, no openssl.
 
-    python scripts/snowflake_keypair.py [output_dir]
+    uv run scripts/snowflake_keypair.py [output_dir]
 
 Writes snowflake_key.p8 (PRIVATE: keep it out of git) and snowflake_key.pub, then prints the
 ALTER USER statement to run once in a Snowsight worksheet. Point SNOWFLAKE_PRIVATE_KEY_PATH
 in .env at the .p8 file.
 """
-
-from __future__ import annotations
 
 import sys
 from pathlib import Path
