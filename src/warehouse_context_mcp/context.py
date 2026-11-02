@@ -24,7 +24,8 @@ class Limits:
 class WarehouseContext:
     def __init__(self, warehouse: Warehouse, catalog: Catalog, limits: Limits | None = None):
         self.wh = warehouse
-        self.catalog = catalog
+        # Comments and tags stored in the warehouse, overlaid by the curated YAML catalog.
+        self.catalog = warehouse.native_catalog().merged_with(catalog)
         self.limits = limits or Limits()
 
     def _pii_map(self) -> dict[str, set[str]]:
@@ -119,6 +120,13 @@ class WarehouseContext:
         unknown = guarded.tables - set(self.wh.list_tables())
         if unknown:
             return {"ok": False, "error": f"unknown tables: {sorted(unknown)}"}
+        cat_ns, schema_ns = self.wh.namespace
+        for cat, schema, name in guarded.qualified:
+            if (schema and schema != schema_ns) or (cat and cat_ns and cat != cat_ns):
+                return {
+                    "ok": False,
+                    "error": f"table {name!r} is outside the configured schema {schema_ns!r}",
+                }
         result = self.wh.run(guarded.sql, self.limits.timeout_s)
         pii = set().union(*(self.catalog.pii_columns(t) for t in guarded.tables))
         return {

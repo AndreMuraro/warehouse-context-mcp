@@ -8,7 +8,7 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
-from .adapters import DuckDBWarehouse
+from .adapters import DatabricksWarehouse, DuckDBWarehouse, SnowflakeWarehouse, Warehouse
 from .catalog import Catalog
 from .context import Limits, WarehouseContext
 
@@ -61,14 +61,28 @@ def build_server(ctx: WarehouseContext) -> MCPServer:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="warehouse-context-mcp")
-    parser.add_argument("--duckdb", required=True, help="path to a DuckDB database file")
-    parser.add_argument("--catalog", help="path to the catalog YAML file")
+    parser.add_argument(
+        "--backend",
+        choices=["duckdb", "snowflake", "databricks"],
+        default="duckdb",
+        help="snowflake and databricks read connection settings from environment variables",
+    )
+    parser.add_argument("--duckdb", help="path to a DuckDB database file (duckdb backend)")
+    parser.add_argument("--catalog", help="path to the curated catalog YAML file")
     parser.add_argument("--max-rows", type=int, default=200)
     args = parser.parse_args(argv)
 
-    ctx = WarehouseContext(
-        DuckDBWarehouse(args.duckdb), Catalog.load(args.catalog), Limits(max_rows=args.max_rows)
-    )
+    warehouse: Warehouse
+    if args.backend == "snowflake":
+        warehouse = SnowflakeWarehouse.from_env()
+    elif args.backend == "databricks":
+        warehouse = DatabricksWarehouse.from_env()
+    else:
+        if not args.duckdb:
+            parser.error("--duckdb is required for the duckdb backend")
+        warehouse = DuckDBWarehouse(args.duckdb)
+
+    ctx = WarehouseContext(warehouse, Catalog.load(args.catalog), Limits(max_rows=args.max_rows))
     build_server(ctx).run()
 
 

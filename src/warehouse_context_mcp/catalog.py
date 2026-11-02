@@ -46,6 +46,38 @@ class Catalog(BaseModel):
         raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
         return cls.model_validate(raw)
 
+    def merged_with(self, curated: Catalog) -> Catalog:
+        """Combine warehouse-native docs (self) with a curated catalog.
+
+        Curated values win where they are set; native comments and tags fill the gaps.
+        A column is PII if either source says so: flags can be added, never removed.
+        """
+        out: dict[str, TableDoc] = {}
+        for name in sorted(set(self.tables) | set(curated.tables)):
+            native = self.tables.get(name, TableDoc())
+            cur = curated.tables.get(name, TableDoc())
+            cols: dict[str, ColumnDoc] = {}
+            for col in sorted(set(native.columns) | set(cur.columns)):
+                n = native.columns.get(col, ColumnDoc())
+                c = cur.columns.get(col, ColumnDoc())
+                cols[col] = ColumnDoc(
+                    description=c.description or n.description, pii=c.pii or n.pii
+                )
+            out[name] = TableDoc(
+                description=cur.description or native.description,
+                owner=cur.owner or native.owner,
+                grain=cur.grain or native.grain,
+                upstream=cur.upstream or native.upstream,
+                freshness_column=cur.freshness_column or native.freshness_column,
+                expected_freshness_hours=(
+                    cur.expected_freshness_hours
+                    if cur.expected_freshness_hours is not None
+                    else native.expected_freshness_hours
+                ),
+                columns=cols,
+            )
+        return Catalog(tables=out)
+
     def table(self, name: str) -> TableDoc:
         return self.tables.get(name.lower(), TableDoc())
 

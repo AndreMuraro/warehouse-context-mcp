@@ -38,6 +38,8 @@ class QueryRejected(ValueError):
 class GuardedQuery:
     sql: str
     tables: frozenset[str]
+    # (catalog, schema, table) as written, lower-cased; empty strings when unqualified.
+    qualified: frozenset[tuple[str, str, str]] = frozenset()
 
 
 def guard(
@@ -70,7 +72,9 @@ def guard(
         if isinstance(node, FORBIDDEN_NODES):
             raise QueryRejected(f"forbidden construct: {node.key.upper()}")
 
-    tables = frozenset(t.name.lower() for t in tree.find_all(exp.Table))
+    ctes = {c.alias_or_name.lower() for c in tree.find_all(exp.CTE)}
+    physical = [t for t in tree.find_all(exp.Table) if t.name.lower() not in ctes or t.db]
+    tables = frozenset(t.name.lower() for t in physical)
     sensitive = set().union(*((pii or {}).get(t, set()) for t in tables)) if tables else set()
     for column in tree.find_all(exp.Column):
         if column.name.lower() in sensitive and not _inside_count(column):
@@ -80,7 +84,8 @@ def guard(
 
     assert isinstance(tree, exp.Query)  # narrowed by the READ_ROOTS check above
     limited = _apply_limit(tree, max_rows)
-    return GuardedQuery(sql=limited.sql(dialect=dialect), tables=tables)
+    qualified = frozenset((t.catalog.lower(), t.db.lower(), t.name.lower()) for t in physical)
+    return GuardedQuery(sql=limited.sql(dialect=dialect), tables=tables, qualified=qualified)
 
 
 def _inside_count(node: exp.Expression) -> bool:
