@@ -23,6 +23,25 @@ from .catalog import Catalog, ColumnDoc, TableDoc
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
 
 
+def load_env_file(path: str | os.PathLike[str] = ".env") -> None:
+    """Load KEY=VALUE lines into os.environ without overriding existing variables.
+
+    Handles Windows line endings and optional quotes. Missing file is not an error.
+    """
+    try:
+        text = open(path, encoding="utf-8").read()  # noqa: SIM115
+    except FileNotFoundError:
+        return
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        value = value.strip().strip('"').strip("'")
+        if value:
+            os.environ.setdefault(key.strip(), value)
+
+
 def _ident(value: str) -> str:
     """Validate configured identifiers before they are interpolated into catalog SQL."""
     if not _IDENT.fullmatch(value):

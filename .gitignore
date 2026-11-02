@@ -8,3 +8,5 @@ __pycache__/
 *.duckdb.wal
 dist/
 .env
+*.p8
+snowflake_key.pub

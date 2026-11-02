@@ -145,3 +145,21 @@ def test_curated_catalog_wins_but_cannot_unflag_pii() -> None:
 def test_cte_names_are_not_treated_as_tables() -> None:
     q = guard("with recent as (select * from stg_voyages) select count(*) from recent")
     assert q.tables == {"stg_voyages"}
+
+
+def test_env_file_loader_handles_crlf_quotes_and_precedence(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from warehouse_context_mcp.adapters import load_env_file
+
+    env = tmp_path / ".env"
+    env.write_bytes(b'WCM_A="one"\r\nWCM_B=\r\n# comment\r\nWCM_C=three\r\n')
+    monkeypatch.setenv("WCM_C", "kept")
+    monkeypatch.delenv("WCM_A", raising=False)
+    monkeypatch.delenv("WCM_B", raising=False)
+    load_env_file(env)
+    import os
+
+    assert os.environ["WCM_A"] == "one"
+    assert "WCM_B" not in os.environ
+    assert os.environ["WCM_C"] == "kept"

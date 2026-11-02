@@ -8,7 +8,13 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
-from .adapters import DatabricksWarehouse, DuckDBWarehouse, SnowflakeWarehouse, Warehouse
+from .adapters import (
+    DatabricksWarehouse,
+    DuckDBWarehouse,
+    SnowflakeWarehouse,
+    Warehouse,
+    load_env_file,
+)
 from .catalog import Catalog
 from .context import Limits, WarehouseContext
 
@@ -70,7 +76,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--duckdb", help="path to a DuckDB database file (duckdb backend)")
     parser.add_argument("--catalog", help="path to the curated catalog YAML file")
     parser.add_argument("--max-rows", type=int, default=200)
+    parser.add_argument("--env-file", default=".env", help="optional KEY=VALUE file to load")
     args = parser.parse_args(argv)
+    load_env_file(args.env_file)
 
     warehouse: Warehouse
     if args.backend == "snowflake":

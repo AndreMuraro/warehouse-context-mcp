@@ -3,6 +3,9 @@
     WCM_LIVE=snowflake pytest -m live      # needs SNOWFLAKE_* variables (see .env.example)
     WCM_LIVE=databricks pytest -m live     # needs DATABRICKS_* variables
 
+    PowerShell:  $env:WCM_LIVE = "snowflake"; pytest -m live
+    Variables are read from the environment or from ./.env.
+
 They run the demo scripts' expectations: 4 tables, documented columns, the PII tag
 honoured, writes refused.
 """
@@ -13,11 +16,17 @@ import os
 
 import pytest
 
-from warehouse_context_mcp.adapters import DatabricksWarehouse, SnowflakeWarehouse, Warehouse
+from warehouse_context_mcp.adapters import (
+    DatabricksWarehouse,
+    SnowflakeWarehouse,
+    Warehouse,
+    load_env_file,
+)
 from warehouse_context_mcp.catalog import Catalog
 from warehouse_context_mcp.context import WarehouseContext
 from warehouse_context_mcp.guardrails import MASK
 
+load_env_file()
 BACKEND = os.environ.get("WCM_LIVE", "")
 pytestmark = [
     pytest.mark.live,

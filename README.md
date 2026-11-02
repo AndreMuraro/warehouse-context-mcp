@@ -65,7 +65,19 @@ cp .env.example .env                     # fill in your own values; .env is git-
 claude mcp add warehouse -- warehouse-context-mcp --backend snowflake --catalog examples/catalog.yaml
 ```
 
-Live tests (skipped unless credentials are set): `WCM_LIVE=snowflake pytest -m live`.
+Live tests (skipped unless credentials are set): `WCM_LIVE=snowflake pytest -m live`. The server and the live tests read `./.env` automatically; variables already set in the environment win.
+
+On Windows (PowerShell):
+
+```powershell
+py -3.12 -m venv .venv; .\.venv\Scripts\Activate.ps1
+pip install -e ".[snowflake,databricks,dev]"
+python scripts/snowflake_keypair.py          # optional: key-pair auth, prints the ALTER USER to run once
+$env:WCM_LIVE = "snowflake"; pytest -m live -q
+$env:WCM_LIVE = "databricks"; pytest -m live -q
+```
+
+On the Databricks Free Edition the personal access token belongs to the workspace admin, so the read-only connection layer is not available there; the parsing and limit guardrails still apply. In a real workspace, use a service principal with only `USE` and `SELECT` grants.
 
 ## The catalog
 
