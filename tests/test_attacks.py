@@ -10,7 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from warehouse_context_mcp.domain import Catalog, Namespace, QueryAccepted, QueryRejectedError
+from warehouse_context_mcp.domain import (
+    Catalog,
+    Namespace,
+    QueryAccepted,
+    QueryRefused,
+    QueryRejectedError,
+)
 from warehouse_context_mcp.guardrails import QueryPolicy
 from warehouse_context_mcp.service import Limits, WarehouseContext
 from warehouse_context_mcp.warehouses import DuckDBWarehouse
@@ -44,6 +50,13 @@ def test_duckdb_attack_leaks_nothing(warehouse: DuckDBWarehouse, sql: str) -> No
     if isinstance(result, QueryAccepted):
         assert not LEAK.search(str(result.rows)), result
         assert len(str(result.rows)) < 400_000
+
+
+@pytest.mark.parametrize("sql", load("order_oracles.sql"))
+def test_order_by_cannot_sort_by_pii(warehouse: DuckDBWarehouse, sql: str) -> None:
+    ctx = WarehouseContext(warehouse, Catalog.load(CATALOG))
+    result = ctx.query(sql)
+    assert isinstance(result, QueryRefused), result
 
 
 SNOWFLAKE_COLUMNS: dict[str, Mapping[str, str]] = {

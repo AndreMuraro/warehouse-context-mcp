@@ -200,9 +200,13 @@ class QueryPolicy:
     def _require_resolved_columns_and_no_pii_reads(self, tree: exp.Query) -> None:
         # Qualification gives every real column a source. A reference left without one is
         # something else, such as a table alias used as a whole-row value (SELECT t FROM t).
+        scopes = {id(scope.expression): scope for scope in traverse_scope(tree)}
         for column in tree.find_all(exp.Column):
-            if not column.table and not _is_output_name_in_order_by(column):
-                msg = f"{column.sql()!r} does not resolve to a table column"
+            if not column.table and not self._is_unambiguous_output_name(column, scopes):
+                msg = (
+                    f"{column.sql()!r} does not resolve to a table column, or is an output "
+                    "name in ORDER BY that is also a table column; rename the output"
+                )
                 raise QueryRejectedError(msg)
         for scope in traverse_scope(tree):
             for column in scope.columns:
@@ -228,6 +232,29 @@ class QueryPolicy:
                 "counted with COUNT(col) / COUNT(DISTINCT col), nothing else"
             )
             raise QueryRejectedError(msg)
+
+    def _is_unambiguous_output_name(self, column: exp.Column, scopes: Mapping[int, Scope]) -> bool:
+        """ORDER BY may name the query's own outputs, which carry no source table.
+
+        Only when the name cannot also mean a column of a table in that query: engines
+        bind such a name, at least inside expressions, to the table column, so
+        ``SELECT id AS email ... ORDER BY email LIKE 'a%'`` would sort by the real
+        ``email``. sqlglot reads it as the alias, so ambiguity is refused outright.
+        """
+        order = column.find_ancestor(exp.Order, exp.Select)
+        if not isinstance(order, exp.Order):
+            return False
+        query = order.parent
+        if not isinstance(query, exp.Query) or column.name not in query.named_selects:
+            return False
+        scope = scopes.get(id(query))
+        if scope is None:
+            return False
+        name = column.name.lower()
+        for source in scope.sources.values():
+            if isinstance(source, exp.Table) and name in (self.columns(source.name.lower()) or {}):
+                return False
+        return True
 
     # -- helpers ------------------------------------------------------------------------
 
@@ -298,15 +325,6 @@ def _source(scope: Scope, alias: str) -> exp.Table | Scope | None:
             return source if isinstance(source, exp.Table | Scope) else None
         current = current.parent
     return None
-
-
-def _is_output_name_in_order_by(column: exp.Column) -> bool:
-    """ORDER BY may name the query's own outputs, which have no source table."""
-    order = column.find_ancestor(exp.Order, exp.Select)
-    if not isinstance(order, exp.Order):
-        return False
-    query = order.parent
-    return isinstance(query, exp.Query) and column.name in query.named_selects
 
 
 def _is_bare_count_argument(column: exp.Column) -> bool:

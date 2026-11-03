@@ -78,5 +78,9 @@ planted `.env` file, and the supply chain (dependencies, Actions, images).
 
 ## Verifying
 
-`tests/attacks/` holds the queries from the independent review. They run on every commit:
-DuckDB ones end to end, Snowflake and Databricks ones through the policy for their dialect.
+`tests/attacks/` holds the queries from two independent adversarial reviews and runs on
+every commit: DuckDB ones end to end, Snowflake and Databricks ones through the policy for
+their dialect. The second review, run against the allow-list design, found one more gap:
+an output alias named like a PII column let `ORDER BY` sort by the real column (the policy
+read it as the alias, the engine as the table column). Output names in `ORDER BY` that
+are also table columns are now refused; those queries are in `order_oracles.sql`.
