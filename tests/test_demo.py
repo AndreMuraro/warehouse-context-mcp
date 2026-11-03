@@ -1,5 +1,7 @@
 """The bundled demo: zero-setup for MCP clients, safe when several start at once."""
 
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -44,3 +46,13 @@ def test_demo_flag_excludes_other_sources(
     with pytest.raises(SystemExit):
         cli.main(["--demo", *extra])
     assert "--demo cannot be combined" in capsys.readouterr().err
+
+
+def test_module_entry_point_used_by_the_dockerfile(tmp_path: Path) -> None:
+    out = subprocess.run(  # noqa: S603  fixed arguments, our own interpreter
+        [sys.executable, "-m", "warehouse_context_mcp.demo", str(tmp_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    assert out == [str(tmp_path / "demo.duckdb"), str(tmp_path / "catalog.yaml")]

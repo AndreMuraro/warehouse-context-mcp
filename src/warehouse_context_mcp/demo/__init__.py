@@ -8,7 +8,6 @@ Every value is generated from a fixed seed; no real vessels, companies or people
 import os
 import random
 import shutil
-import sys
 import tempfile
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
@@ -133,8 +132,3 @@ def default_demo_dir() -> Path:
     if configured := os.environ.get("WCM_DEMO_DIR"):
         return Path(configured)
     return Path(tempfile.gettempdir()) / "warehouse-context-mcp" / __version__
-
-
-if __name__ == "__main__":
-    db, cat = ensure_demo(Path(sys.argv[1]) if len(sys.argv) > 1 else None)
-    print(f"{db}\n{cat}")  # noqa: T201
