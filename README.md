@@ -107,6 +107,40 @@ On the Databricks Free Edition the personal access token belongs to the workspac
 | Databricks extra | ✓ | ✓ (lz4 and thrift build from source) |
 | Snowflake extra | ✓ | not yet: no 3.15 wheels, and the source build fails; the extra is skipped by an environment marker |
 
+## HTTP transport and containers
+
+By default the server speaks MCP over stdio: the client launches it. With `--transport http` it runs as a long-lived Streamable HTTP service instead, with stateless JSON responses and a `/healthz` endpoint:
+
+```bash
+uv run warehouse-context-mcp --duckdb examples/demo.duckdb --catalog examples/catalog.yaml \
+  --transport http --port 8000
+claude mcp add --transport http warehouse http://127.0.0.1:8000/mcp
+```
+
+The HTTP transport has **no authentication**. DNS-rebinding protection stays on even when bound to every interface: only requests whose `Host` header names localhost, or a name passed with `--allowed-host`, are served. Publish it on loopback, or put an authenticating proxy in front.
+
+### Docker
+
+```bash
+docker compose up --build                        # demo warehouse at http://127.0.0.1:8000/mcp
+docker run --rm -i warehouse-context-mcp:local   # or stdio, for clients that launch a command
+```
+
+The image is built from `uv.lock`, runs as a non-root user, and contains every backend plus the synthetic demo warehouse. Compose runs it with a read-only filesystem, no Linux capabilities and `no-new-privileges`, and publishes ports on `127.0.0.1` only.
+
+For a real warehouse, fill in `.env` and start a profile. Credentials reach the container as secret files under `/run/secrets`, not as environment variables:
+
+```bash
+docker compose --profile snowflake up --build    # :8001, key-pair sign-in (no browser in a container)
+docker compose --profile databricks up --build   # :8002, token from DATABRICKS_TOKEN
+```
+
+- **Snowflake** uses `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER` and the key file at `SNOWFLAKE_PRIVATE_KEY_PATH`; Snowflake CLI connection names are a host-only convenience.
+- **Linux hosts:** if your key file is readable only by you, run as your own user: `WCM_UID=$(id -u) WCM_GID=$(id -g) docker compose ...`.
+- Version tags publish the image to `ghcr.io/andremuraro/warehouse-context-mcp`.
+
+CI builds the image, checks the stdio transport, brings the Compose service up until healthy, calls a tool over HTTP, confirms a foreign `Host` header is refused, and verifies the container is non-root and read-only.
+
 ## The catalog
 
 Meaning lives in a YAML file reviewed in Git like code ([example](examples/catalog.yaml)):
@@ -134,7 +168,7 @@ src/warehouse_context_mcp/
 ├── guardrails/    QueryPolicy: parse, scope, PII rules, row limit; result masking
 ├── warehouses/    Warehouse protocol + DuckDB, Snowflake, Databricks adapters
 ├── service.py     WarehouseContext: combines the three; no MCP dependency
-├── server.py      MCP transport: six read-only tools with typed inputs and outputs
+├── server.py      MCP transport: six read-only tools, stdio or Streamable HTTP
 ├── settings.py    pydantic-settings for connection config and secrets
 └── cli.py         entry point
 ```
@@ -163,6 +197,7 @@ CI runs the same on Python 3.14 and 3.15 (Linux) and 3.14 (Windows), and builds 
 - [x] v0.1: DuckDB adapter, catalog, six tools, three-layer guardrails, tests, CI
 - [x] v0.2: Snowflake and Databricks Unity Catalog adapters, native comments and PII tags, schema scoping
 - [x] v0.3: Python 3.14+, uv, ruff and ty; layered package; typed tool inputs and outputs; table names qualified by the policy
+- [x] v0.4: Streamable HTTP transport, hardened container image and Compose setup, Snowflake CLI connections
 - [ ] Catalog import from dbt `manifest.json`
 - [ ] Evaluation: 20 analyst questions answered with and without the server, scored for correctness and table choice
 - [ ] Per-tool audit log

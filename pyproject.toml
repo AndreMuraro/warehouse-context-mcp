@@ -1,6 +1,6 @@
 [project]
 name = "warehouse-context-mcp"
-version = "0.3.0"
+version = "0.4.0"
 description = "An MCP server that gives AI agents trustworthy, governed context about a data warehouse: docs, lineage, freshness, and read-only queries with guardrails."
 readme = "README.md"
 license = "MIT"
@@ -24,6 +24,8 @@ dependencies = [
     "pydantic-settings>=2.11",
     "pyyaml>=6.0.3",
     "sqlglot>=30",
+    "starlette>=1",
+    "uvicorn>=0.40",
 ]
 
 [project.optional-dependencies]

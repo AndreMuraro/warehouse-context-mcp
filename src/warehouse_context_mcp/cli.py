@@ -3,20 +3,28 @@
 import argparse
 import sys
 from collections.abc import Sequence
+from enum import StrEnum
 from pathlib import Path
+
+import uvicorn
 
 from . import __version__
 from .domain.catalog import Catalog
 from .domain.errors import ConfigurationError
-from .server import build_server
+from .server import build_server, http_app
 from .service import Limits, WarehouseContext
 from .warehouses import Backend, open_warehouse
+
+
+class Transport(StrEnum):
+    STDIO = "stdio"
+    HTTP = "http"
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="warehouse-context-mcp",
-        description="Serve governed warehouse context to AI agents over MCP (stdio).",
+        description="Serve governed warehouse context to AI agents over MCP.",
     )
     parser.add_argument(
         "--backend",
@@ -30,6 +38,23 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-rows", type=int, default=200, help="hard cap on rows returned")
     parser.add_argument(
         "--env-file", type=Path, default=Path(".env"), help="optional KEY=VALUE settings file"
+    )
+    http = parser.add_argument_group("transport")
+    http.add_argument(
+        "--transport",
+        type=Transport,
+        choices=list(Transport),
+        default=Transport.STDIO,
+        help="stdio: launched by an MCP client (default); http: Streamable HTTP service",
+    )
+    http.add_argument("--host", default="127.0.0.1", help="http: interface to bind")
+    http.add_argument("--port", type=int, default=8000, help="http: port to listen on")
+    http.add_argument(
+        "--allowed-host",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="http: extra Host header value to accept besides localhost (repeatable)",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
@@ -46,7 +71,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         ctx = WarehouseContext(
             warehouse, Catalog.load(args.catalog), Limits(max_rows=args.max_rows)
         )
-        build_server(ctx).run()
+        server = build_server(ctx)
+        match args.transport:
+            case Transport.STDIO:
+                server.run()
+            case Transport.HTTP:
+                app = http_app(server, allowed_hosts=args.allowed_host)
+                uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     finally:
         warehouse.close()
     return 0

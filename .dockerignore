@@ -1,0 +1,21 @@
+# Secrets never enter the build context.
+.env
+.env.*
+!.env.example
+.secrets/
+*.p8
+*.pem
+snowflake_key.pub
+
+# Local state and build output.
+.git/
+.github/
+.venv/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+dist/
+*.duckdb
+*.duckdb.wal

@@ -1,7 +1,8 @@
-"""Connection settings, read from the environment and an optional ``.env`` file.
+"""Connection settings from the environment, an optional ``.env`` file and Docker secrets.
 
-Real environment variables win over the file. Empty values count as unset, so a template
-``.env`` with blank secrets behaves as if those lines were absent.
+Real environment variables win over the file, which wins over secret files. Empty values
+count as unset, so a template ``.env`` with blank secrets behaves as if those lines were
+absent.
 """
 
 from collections.abc import Mapping
@@ -13,12 +14,18 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .domain.errors import ConfigurationError
 
+SECRETS_DIR = Path("/run/secrets")
+"""Docker/Compose secrets: a file named like the variable (``databricks_token``) is read
+as its value, so secrets need not appear in the container's environment."""
+
 _COMMON = SettingsConfigDict(
     env_file=".env",
     env_file_encoding="utf-8",
     env_ignore_empty=True,
     extra="ignore",
     frozen=True,
+    # Only when present: pydantic-settings warns about a missing directory.
+    secrets_dir=SECRETS_DIR if SECRETS_DIR.is_dir() else None,
 )
 
 

@@ -1,0 +1,74 @@
+# warehouse-context-mcp as a local HTTP service.
+#
+#   docker compose up --build                         # demo warehouse on http://127.0.0.1:8000/mcp
+#   docker compose --profile snowflake up --build     # Snowflake on :8001 (settings from .env)
+#   docker compose --profile databricks up --build    # Databricks on :8002
+#
+# The HTTP transport has no authentication: ports are published on loopback only.
+# Compose reads .env in this directory to fill in ${...} below; only the variables each
+# service needs are passed in, and credentials arrive as secret files, not environment.
+
+name: warehouse-context-mcp
+
+x-service: &service
+  image: warehouse-context-mcp:local
+  build: .
+  restart: unless-stopped
+  # Hardening: the process only reads its venv and writes nothing but /tmp.
+  read_only: true
+  tmpfs: [/tmp, /home/app]  # drivers write caches under $HOME
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  # On Linux, run as your own user if secret files are only readable by you:
+  # WCM_UID=$(id -u) WCM_GID=$(id -g) docker compose ...
+  user: "${WCM_UID:-10001}:${WCM_GID:-10001}"
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+    interval: 30s
+    timeout: 5s
+    start_period: 20s
+    retries: 3
+
+services:
+  demo:
+    <<: *service
+    command: [--duckdb, /opt/demo/demo.duckdb, --catalog, /opt/demo/catalog.yaml,
+              --transport, http, --host, 0.0.0.0]
+    ports: ["127.0.0.1:8000:8000"]
+
+  snowflake:
+    <<: *service
+    profiles: [snowflake]
+    command: [--backend, snowflake, --catalog, /opt/demo/catalog.yaml,
+              --transport, http, --host, 0.0.0.0]
+    ports: ["127.0.0.1:8001:8000"]
+    environment:
+      # A container has no browser, so key-pair sign-in is used. Snowflake CLI connection
+      # names are not used here: set the account and user explicitly in .env.
+      SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT:-}
+      SNOWFLAKE_USER: ${SNOWFLAKE_USER:-}
+      SNOWFLAKE_ROLE: ${SNOWFLAKE_ROLE:-WCM_READER}
+      SNOWFLAKE_WAREHOUSE: ${SNOWFLAKE_WAREHOUSE:-WCM_XS}
+      SNOWFLAKE_DATABASE: ${SNOWFLAKE_DATABASE:-WCM_DEMO}
+      SNOWFLAKE_SCHEMA: ${SNOWFLAKE_SCHEMA:-SHIPPING}
+      SNOWFLAKE_PRIVATE_KEY_PATH: /run/secrets/snowflake_key
+    secrets: [snowflake_key]
+
+  databricks:
+    <<: *service
+    profiles: [databricks]
+    command: [--backend, databricks, --catalog, /opt/demo/catalog.yaml,
+              --transport, http, --host, 0.0.0.0]
+    ports: ["127.0.0.1:8002:8000"]
+    environment:
+      DATABRICKS_HOST: ${DATABRICKS_HOST:-}
+      DATABRICKS_HTTP_PATH: ${DATABRICKS_HTTP_PATH:-}
+      DATABRICKS_CATALOG: ${DATABRICKS_CATALOG:-workspace}
+      DATABRICKS_SCHEMA: ${DATABRICKS_SCHEMA:-wcm_demo}
+    secrets: [databricks_token]  # read as DATABRICKS_TOKEN from /run/secrets
+
+secrets:
+  snowflake_key:
+    file: ${SNOWFLAKE_PRIVATE_KEY_PATH:-./.secrets/snowflake_key.p8}
+  databricks_token:
+    environment: DATABRICKS_TOKEN

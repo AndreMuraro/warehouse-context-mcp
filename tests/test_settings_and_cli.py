@@ -65,3 +65,16 @@ def test_cli_version(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit, match="0"):
         cli.main(["--version"])
     assert "warehouse-context-mcp" in capsys.readouterr().out
+
+
+def test_tokens_can_come_from_docker_secret_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    (secrets / "databricks_token").write_text("dapi-from-secret\n", encoding="utf-8")
+    monkeypatch.setenv("DATABRICKS_HOST", "dbc-1.cloud.databricks.com")
+    monkeypatch.setenv("DATABRICKS_HTTP_PATH", "/sql/1.0/warehouses/abc")
+    settings = DatabricksSettings(_env_file=None, _secrets_dir=secrets)
+    assert settings.token.get_secret_value() == "dapi-from-secret"
+    assert "dapi-from-secret" not in repr(settings)

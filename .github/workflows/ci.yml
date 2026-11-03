@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 permissions:
@@ -52,3 +53,78 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - run: uv build
       - run: uvx --from dist/*.whl warehouse-context-mcp --version
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: warehouse-context-mcp:local
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: stdio transport answers initialize
+        run: |
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
+            | timeout 60 docker run --rm -i warehouse-context-mcp:local | tee stdio.json
+          grep -q '"name":"warehouse-context"' stdio.json
+      - name: Compose service becomes healthy
+        run: docker compose up --detach --wait --wait-timeout 90 demo
+      - name: HTTP transport serves tools and refuses foreign hosts
+        run: |
+          curl -fsS http://127.0.0.1:8000/healthz
+          curl -fsS -X POST http://127.0.0.1:8000/mcp \
+            -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+            -H 'Mcp-Protocol-Version: 2025-06-18' \
+            -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_query","arguments":{"sql":"select vessel_class, count(*) n from dim_vessels group by 1"}}}' \
+            | tee http.json
+          grep -q '"ok":true' http.json
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8000/mcp \
+            -H 'Host: attacker.example' -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' -d '{}')
+          test "$code" = 421
+      - name: Runs as non-root on a read-only filesystem
+        run: |
+          test "$(docker compose exec -T demo id -u)" = 10001
+          if docker compose exec -T demo touch /opt/venv/probe; then
+            echo "filesystem is writable"; exit 1
+          fi
+      - if: failure()
+        run: docker compose logs
+      - if: always()
+        run: docker compose down
+
+  publish:
+    # Release images are pushed to GHCR only for version tags.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [lint, test, container]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/warehouse-context-mcp
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha

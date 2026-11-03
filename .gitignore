@@ -11,3 +11,4 @@ dist/
 .env
 *.p8
 snowflake_key.pub
+.secrets/
