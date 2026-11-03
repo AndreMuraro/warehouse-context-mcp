@@ -8,7 +8,7 @@ downstream catalogs such as GitHub's pick servers up.
 
 1. **PyPI trusted publisher.** On pypi.org, under *Your account → Publishing*, add a
    pending publisher: project `warehouse-context-mcp`, owner `AndreMuraro`, repository
-   `warehouse-context-mcp`, workflow `ci.yml`, environment `pypi`. No API token is stored.
+   `warehouse-context-mcp`, workflow `release.yml`, environment `pypi`. No API token is stored.
 2. **GitHub environment.** In the repository settings, create an environment named `pypi`
    (optionally requiring your approval before each release).
 3. **MCP Registry.** Nothing to set up: the workflow signs in with GitHub OIDC, which grants

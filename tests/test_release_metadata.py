@@ -57,5 +57,5 @@ def test_plugin_pins_the_released_server() -> None:
     manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     assert manifest["version"] == PROJECT["version"]
     server = json.loads((PLUGIN / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
-    pinned = f"git+https://github.com/AndreMuraro/warehouse-context-mcp@v{PROJECT['version']}"
-    assert pinned in server["warehouse"]["args"]
+    # An exact PyPI release: installing the plugin never runs unreleased code.
+    assert f"warehouse-context-mcp=={PROJECT['version']}" in server["warehouse"]["args"]

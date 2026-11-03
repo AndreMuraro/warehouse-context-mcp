@@ -48,10 +48,10 @@ The queries an independent review used to break an earlier version live in [`tes
 Try it without cloning (needs [uv](https://docs.astral.sh/uv/)); `--demo` serves a bundled, fully synthetic shipping warehouse that is built on first run:
 
 ```bash
-uvx --from git+https://github.com/AndreMuraro/warehouse-context-mcp warehouse-context-mcp --demo
+uvx warehouse-context-mcp --demo
 ```
 
-Once released to PyPI this becomes `uvx warehouse-context-mcp --demo`.
+Also on [PyPI](https://pypi.org/project/warehouse-context-mcp/), as a container image (`ghcr.io/andremuraro/warehouse-context-mcp`), and in the [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.AndreMuraro/warehouse-context-mcp`. Releases carry build provenance; see [SECURITY.md](SECURITY.md).
 
 ### Use it from your MCP client
 

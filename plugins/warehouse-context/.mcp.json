@@ -3,9 +3,7 @@
     "warehouse": {
       "command": "uvx",
       "args": [
-        "--from",
-        "git+https://github.com/AndreMuraro/warehouse-context-mcp@v0.4.0",
-        "warehouse-context-mcp",
+        "warehouse-context-mcp==0.4.0",
         "--demo"
       ]
     }
