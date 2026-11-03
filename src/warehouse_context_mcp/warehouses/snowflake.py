@@ -56,6 +56,8 @@ def connect_arguments(settings: SnowflakeSettings) -> dict[str, object]:
 
     if settings.private_key_path:
         args["private_key_file"] = str(settings.private_key_path)
+        if settings.private_key_passphrase:
+            args["private_key_file_pwd"] = settings.private_key_passphrase.get_secret_value()
     elif settings.password:
         args["password"] = settings.password.get_secret_value()
     elif not settings.connection_name:
@@ -66,10 +68,21 @@ def connect_arguments(settings: SnowflakeSettings) -> dict[str, object]:
 class SnowflakeWarehouse(DbApiWarehouse[Positional]):
     dialect = "snowflake"
 
-    def __init__(self, connection: Connection[Positional], database: str, schema: str) -> None:
+    def __init__(
+        self,
+        connection: Connection[Positional],
+        database: str,
+        schema: str,
+        *,
+        require_pii_tags: bool = True,
+    ) -> None:
         self._database = validate_identifier(database).upper()
         self._schema = validate_identifier(schema).upper()
-        super().__init__(connection, Namespace(schema=schema, catalog=database))
+        super().__init__(
+            connection,
+            Namespace(schema=schema, catalog=database),
+            require_pii_tags=require_pii_tags,
+        )
 
     @classmethod
     def connect(cls, settings: SnowflakeSettings) -> Self:
@@ -87,10 +100,12 @@ class SnowflakeWarehouse(DbApiWarehouse[Positional]):
         connection = cast(
             "Connection[Positional]", snowflake.connector.connect(**connect_arguments(settings))
         )
-        return cls.from_session(connection)
+        return cls.from_session(connection, require_pii_tags=settings.require_pii_tags)
 
     @classmethod
-    def from_session(cls, connection: Connection[Positional]) -> Self:
+    def from_session(
+        cls, connection: Connection[Positional], *, require_pii_tags: bool = True
+    ) -> Self:
         """Adopt the role, database and schema the session actually has.
 
         A Snowflake CLI connection may carry its own defaults, so the session is the source
@@ -98,6 +113,9 @@ class SnowflakeWarehouse(DbApiWarehouse[Positional]):
         """
         cursor = connection.cursor()
         try:
+            # Only the primary role's privileges: secondary roles (often ALL by default)
+            # would add every other role the user holds, including write access.
+            cursor.execute("use secondary roles none")
             cursor.execute("select current_role(), current_database(), current_schema()")
             role, database, schema = (str(v or "") for v in cursor.fetchall()[0])
         finally:
@@ -116,7 +134,7 @@ class SnowflakeWarehouse(DbApiWarehouse[Positional]):
         if problem:
             connection.close()
             raise ConfigurationError(problem)
-        return cls(connection, database, schema)
+        return cls(connection, database, schema, require_pii_tags=require_pii_tags)
 
     @override
     def _qualified(self, table: str) -> str:
@@ -160,17 +178,14 @@ class SnowflakeWarehouse(DbApiWarehouse[Positional]):
     def _pii_columns(self) -> dict[str, set[str]]:
         pii: dict[str, set[str]] = {}
         for table in self.list_tables():
-            try:
-                rows = self._fetch(
-                    Statement(
-                        "select column_name, tag_name, tag_value from table("
-                        f"{self._database}.information_schema.tag_references_all_columns"
-                        "(%s, 'table'))",
-                        (self._qualified(table),),
-                    )
+            rows = self._fetch(
+                Statement(
+                    "select column_name, tag_name, tag_value from table("
+                    f"{self._database}.information_schema.tag_references_all_columns"
+                    "(%s, 'table'))",
+                    (self._qualified(table),),
                 )
-            except Exception:  # noqa: BLE001  tagging needs Enterprise edition; degrade gracefully
-                return pii
+            )
             for column, tag, value in rows:
                 if str(tag).lower() == "pii" and str(value).lower() in _TRUTHY:
                     pii.setdefault(table, set()).add(str(column).lower())

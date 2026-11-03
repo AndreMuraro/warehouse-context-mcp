@@ -1,4 +1,6 @@
 from datetime import timedelta
+from pathlib import Path
+from typing import override
 
 import duckdb
 import pytest
@@ -10,7 +12,7 @@ from warehouse_context_mcp.domain import (
     UnknownTableError,
 )
 from warehouse_context_mcp.guardrails import MASK
-from warehouse_context_mcp.service import WarehouseContext
+from warehouse_context_mcp.service import Limits, WarehouseContext
 from warehouse_context_mcp.warehouses import DuckDBWarehouse
 
 from .conftest import NOW
@@ -80,7 +82,7 @@ def test_sample_rows_are_capped_and_masked(ctx: WarehouseContext) -> None:
 def test_query_runs_and_reports_sql(ctx: WarehouseContext) -> None:
     res = accepted(ctx.query("select vessel_class, count(*) n from dim_vessels group by 1"))
     assert "LIMIT" in res.sql_executed
-    assert "main.dim_vessels" in res.sql_executed
+    assert '"main"."dim_vessels"' in res.sql_executed
     assert sum(int(r["n"] or 0) for r in res.rows) == 40
 
 
@@ -99,3 +101,58 @@ def test_query_unknown_table(ctx: WarehouseContext) -> None:
 def test_connection_is_read_only_even_without_guardrails(ctx: WarehouseContext) -> None:
     with pytest.raises(duckdb.Error):
         ctx.warehouse.run("delete from dim_vessels", timeout_s=5)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "select * from read_text('/etc/hostname')",
+        "select getenv('HOME')",
+        "install httpfs",
+        "set enable_external_access = true",
+    ],
+)
+def test_duckdb_connection_is_locked_down_even_without_the_policy(
+    warehouse: DuckDBWarehouse, sql: str
+) -> None:
+    with pytest.raises(duckdb.Error):
+        warehouse.run(sql, timeout_s=5)
+
+
+def test_engine_errors_on_pii_tables_withhold_details(ctx: WarehouseContext) -> None:
+    # Passes the policy, fails in DuckDB: the message would quote a value.
+    res = ctx.query("select cast(charterer_name as int) from dim_charterers")
+    assert isinstance(res, QueryRefused)
+    assert "withheld" in res.error
+    assert "Charterer" not in res.error
+
+
+def test_engine_errors_elsewhere_explain_themselves(ctx: WarehouseContext) -> None:
+    res = ctx.query("select cast(vessel_name as int) from dim_vessels")
+    assert isinstance(res, QueryRefused)
+    assert "Conversion Error" in res.error
+
+
+def test_results_are_bounded_in_size(warehouse: DuckDBWarehouse) -> None:
+    ctx = WarehouseContext(warehouse, limits=Limits(max_cell_chars=5, max_result_bytes=1_000))
+    res = accepted(ctx.query("select vessel_name from dim_vessels"))
+    assert res.truncated
+    assert all(len(str(r["vessel_name"])) <= 5 + len("…[truncated]") for r in res.rows)
+    assert len(res.rows) < 40
+
+
+class CountingWarehouse(DuckDBWarehouse):
+    refreshes = 0
+
+    @override
+    def refresh(self) -> None:
+        self.refreshes += 1
+
+
+def test_metadata_is_reread_after_its_ttl(demo_db: Path) -> None:
+    warehouse = CountingWarehouse.open(demo_db)
+    ctx = WarehouseContext(warehouse, limits=Limits(metadata_ttl_s=0))
+    ctx.query("select count(*) from dim_vessels")
+    ctx.query("select count(*) from dim_vessels")
+    assert warehouse.refreshes >= 3  # startup, then once per query with a zero TTL
+    warehouse.close()

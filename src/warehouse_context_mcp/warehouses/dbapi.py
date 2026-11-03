@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import ClassVar, Protocol
 
 from warehouse_context_mcp.domain.catalog import Catalog, ColumnDoc, TableDoc
-from warehouse_context_mcp.domain.errors import UnknownTableError
+from warehouse_context_mcp.domain.errors import ConfigurationError, UnknownTableError
 from warehouse_context_mcp.domain.namespace import Namespace
 
 from .base import Column, ResultSet, deadline
@@ -59,9 +59,12 @@ class DbApiWarehouse[P: (Positional, Named)](ABC):
 
     dialect: ClassVar[str]
 
-    def __init__(self, connection: Connection[P], namespace: Namespace) -> None:
+    def __init__(
+        self, connection: Connection[P], namespace: Namespace, *, require_pii_tags: bool = True
+    ) -> None:
         self._con = connection
         self.namespace = namespace
+        self._require_pii_tags = require_pii_tags
         self._tables: list[str] | None = None
 
     # -- what subclasses describe ---------------------------------------------------------
@@ -83,7 +86,7 @@ class DbApiWarehouse[P: (Positional, Named)](ABC):
 
     @abstractmethod
     def _pii_columns(self) -> dict[str, set[str]]:
-        """Table name to columns tagged as PII. Empty when tagging is unavailable."""
+        """Table name to columns tagged as PII. Raises if the tags cannot be read."""
 
     @abstractmethod
     def _qualified(self, table: str) -> str: ...
@@ -128,7 +131,17 @@ class DbApiWarehouse[P: (Positional, Named)](ABC):
         column_docs: dict[str, dict[str, str]] = {}
         for table, column, comment in self._fetch(self._column_comments_statement()):
             column_docs.setdefault(str(table).lower(), {})[str(column).lower()] = str(comment)
-        pii = self._pii_columns()
+        try:
+            pii = self._pii_columns()
+        except Exception as err:
+            # Fail closed: silently missing tags would mean silently unmasked PII.
+            if self._require_pii_tags:
+                msg = (
+                    "could not read PII tags from the warehouse; fix the grants, or set "
+                    "*_REQUIRE_PII_TAGS=false and flag PII columns in the curated catalog"
+                )
+                raise ConfigurationError(msg) from err
+            pii = {}
 
         tables: dict[str, TableDoc] = {}
         for table in sorted(descriptions.keys() | column_docs.keys() | pii.keys()):
@@ -142,6 +155,9 @@ class DbApiWarehouse[P: (Positional, Named)](ABC):
                 },
             )
         return Catalog(tables=tables)
+
+    def refresh(self) -> None:
+        self._tables = None
 
     def close(self) -> None:
         self._con.close()

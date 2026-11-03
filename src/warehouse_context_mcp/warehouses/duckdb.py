@@ -11,9 +11,20 @@ from warehouse_context_mcp.domain.namespace import Namespace
 
 from .base import Column, ResultSet, deadline
 
+LOCKED_DOWN: dict[str, str | bool] = {
+    # No files, URLs or attached databases: table functions such as read_csv or read_text
+    # fail even if a query got past the policy.
+    "enable_external_access": False,
+    # No extension downloads (httpfs would add network access) or implicit loading.
+    "autoinstall_known_extensions": False,
+    "autoload_known_extensions": False,
+    # Nothing above can be changed back with SET for the rest of the connection.
+    "lock_configuration": True,
+}
+
 
 class DuckDBWarehouse:
-    """Opening the file with ``read_only=True`` is the connection-level read-only layer."""
+    """The connection-level layers: the file is opened read-only and locked down."""
 
     dialect = "duckdb"
     namespace = Namespace(schema="main")
@@ -23,7 +34,7 @@ class DuckDBWarehouse:
 
     @classmethod
     def open(cls, path: Path) -> Self:
-        return cls(duckdb.connect(str(path), read_only=True))
+        return cls(duckdb.connect(str(path), read_only=True, config=dict(LOCKED_DOWN)))
 
     def list_tables(self) -> list[str]:
         rows = self._con.execute(
@@ -55,6 +66,9 @@ class DuckDBWarehouse:
 
     def native_catalog(self) -> Catalog:
         return Catalog()
+
+    def refresh(self) -> None:
+        """Nothing is cached: DuckDB metadata queries are local and cheap."""
 
     def close(self) -> None:
         self._con.close()

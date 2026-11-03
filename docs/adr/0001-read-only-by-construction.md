@@ -1,6 +1,6 @@
 # ADR 0001: Read-only by construction, in three layers
 
-**Status:** accepted · **Date:** 2026-11-02
+**Status:** accepted; the query-policy design is superseded by [ADR 0004](0004-fail-closed-query-policy.md) · **Date:** 2026-11-02
 
 ## Context
 

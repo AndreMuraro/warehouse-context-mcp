@@ -66,6 +66,8 @@ class QueryAccepted(_Result):
     sql_executed: str
     row_limit: int
     rows: list[Row]
+    truncated: bool = False
+    """Long values were shortened or rows dropped to keep the response within size limits."""
 
 
 class QueryRefused(_Result):

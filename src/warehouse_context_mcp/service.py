@@ -3,6 +3,8 @@
 It has no MCP dependency, so it is tested and reusable without a server.
 """
 
+import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -31,6 +33,12 @@ class Limits:
     sample_rows: int = 5
     timeout_s: float = 10.0
     max_lineage_depth: int = 5
+    max_cell_chars: int = 2_000
+    """Longer text values are shortened; one value cannot flood the agent's context."""
+    max_result_bytes: int = 1_000_000
+    """Rows past this size are dropped and the result is marked truncated."""
+    metadata_ttl_s: float = 600.0
+    """How long table lists, columns, comments and PII tags are reused before re-reading."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,9 +53,34 @@ class WarehouseContext:
         self, warehouse: Warehouse, catalog: Catalog | None = None, limits: Limits | None = None
     ) -> None:
         self.warehouse = warehouse
-        # Comments and tags stored in the warehouse, overlaid by the curated catalog.
-        self.catalog = warehouse.native_catalog().merged_with(catalog or Catalog())
         self.limits = limits or Limits()
+        self._curated = catalog or Catalog()
+        self._merged = Catalog()
+        self._columns: dict[str, Mapping[str, str]] = {}
+        self._loaded_at = -float("inf")
+        self._refresh()  # fail at startup, not on the first question, if metadata is unreadable
+
+    @property
+    def catalog(self) -> Catalog:
+        """Warehouse comments and PII tags overlaid by the curated catalog, kept current."""
+        if time.monotonic() - self._loaded_at > self.limits.metadata_ttl_s:
+            self._refresh()
+        return self._merged
+
+    def _refresh(self) -> None:
+        self.warehouse.refresh()
+        self._merged = self.warehouse.native_catalog().merged_with(self._curated)
+        self._columns = {}
+        self._loaded_at = time.monotonic()
+
+    def _column_types(self, table: str) -> Mapping[str, str] | None:
+        """Column name to type for a known table; the query policy resolves against this."""
+        name = table.lower()
+        if name not in self.warehouse.list_tables():
+            return None
+        if name not in self._columns:
+            self._columns[name] = {c.name: c.data_type for c in self.warehouse.columns(name)}
+        return self._columns[name]
 
     def list_tables(self) -> list[TableSummary]:
         summaries: list[TableSummary] = []
@@ -134,29 +167,39 @@ class WarehouseContext:
             case QueryRefused() as refused:
                 return refused
             case _Executed(sql=executed, result=result, pii=pii):
+                bounded = mask_rows(
+                    result.columns,
+                    result.rows,
+                    pii,
+                    max_cell_chars=self.limits.max_cell_chars,
+                    max_bytes=self.limits.max_result_bytes,
+                )
                 return QueryAccepted(
                     sql_executed=executed,
                     row_limit=limit,
-                    rows=mask_rows(result.columns, result.rows, pii),
+                    rows=bounded.rows,
+                    truncated=bounded.truncated,
                 )
 
     def _execute(self, sql: str, max_rows: int) -> _Executed | QueryRefused:
-        known = self.warehouse.list_tables()
+        catalog = self.catalog
         policy = QueryPolicy(
+            columns=self._column_types,
             dialect=self.warehouse.dialect,
             max_rows=max_rows,
-            pii=self.catalog.pii_map(known),
+            pii=catalog.pii_map(self.warehouse.list_tables()),
             namespace=self.warehouse.namespace,
         )
         try:
             guarded = policy.check(sql)
         except QueryRejectedError as err:
             return QueryRefused(error=str(err))
-        if unknown := guarded.tables - set(known):
-            return QueryRefused(error=f"unknown tables: {sorted(unknown)}")
 
-        result = self.warehouse.run(guarded.sql, self.limits.timeout_s)
-        pii = frozenset[str]().union(*(policy.pii[t] for t in guarded.tables))
+        pii = frozenset[str]().union(*(policy.pii.get(t, frozenset()) for t in guarded.tables))
+        try:
+            result = self.warehouse.run(guarded.sql, self.limits.timeout_s)
+        except Exception as err:  # noqa: BLE001  every driver has its own error types
+            return QueryRefused(error=_engine_error(err, reveals_pii=bool(pii)))
         return _Executed(sql=guarded.sql, result=result, pii=pii)
 
     def _require(self, table: str) -> str:
@@ -164,6 +207,19 @@ class WarehouseContext:
         if name not in self.warehouse.list_tables():
             raise UnknownTableError(table)
         return name
+
+
+def _engine_error(err: Exception, *, reveals_pii: bool) -> str:
+    """Describe a warehouse error without echoing data from a table with PII columns.
+
+    Engine messages can quote the offending value (a failed cast prints it), so for
+    queries touching PII tables only the error type is returned.
+    """
+    kind = type(err).__name__
+    if reveals_pii:
+        return f"the warehouse rejected the query ({kind}); details withheld because it reads PII"
+    first_line = str(err).strip().splitlines()[0] if str(err).strip() else ""
+    return f"the warehouse rejected the query ({kind}): {first_line[:300]}"
 
 
 def _unknown(table: str, reason: str) -> Freshness:

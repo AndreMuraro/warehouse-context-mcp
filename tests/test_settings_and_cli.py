@@ -78,3 +78,29 @@ def test_tokens_can_come_from_docker_secret_files(
     settings = DatabricksSettings(_env_file=None, _secrets_dir=secrets)
     assert settings.token.get_secret_value() == "dapi-from-secret"
     assert "dapi-from-secret" not in repr(settings)
+
+
+@pytest.mark.parametrize(
+    ("host", "allowed"),
+    [
+        ("dbc-1.cloud.databricks.com", True),
+        ("adb-1.2.azuredatabricks.net", True),
+        ("attacker.example", False),
+        ("dbc-1.cloud.databricks.com.attacker.example", False),
+    ],
+)
+def test_databricks_token_only_goes_to_databricks_domains(
+    tmp_path: Path, host: str, *, allowed: bool
+) -> None:
+    from warehouse_context_mcp.domain import ConfigurationError  # noqa: PLC0415
+
+    env = tmp_path / ".env"
+    env.write_text(
+        f"DATABRICKS_HOST={host}\nDATABRICKS_HTTP_PATH=/sql/x\nDATABRICKS_TOKEN=t\n",
+        encoding="utf-8",
+    )
+    if allowed:
+        assert DatabricksSettings.from_env(env).host == host
+    else:
+        with pytest.raises(ConfigurationError, match="not a Databricks domain"):
+            DatabricksSettings.from_env(env)

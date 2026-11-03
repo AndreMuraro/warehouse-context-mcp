@@ -54,7 +54,11 @@ def test_query_masks_and_refuses(ctx: WarehouseContext) -> None:
     assert isinstance(res, QueryAccepted)
     assert len(res.rows) == 3
     assert all(r["contact_email"] == MASK for r in res.rows)
-    assert isinstance(ctx.query("select contact_email from dim_charterers"), QueryRefused)
+    masked = ctx.query("select contact_email from dim_charterers")
+    assert isinstance(masked, QueryAccepted)
+    assert all(r["contact_email"] == MASK for r in masked.rows)
+    filtered = ctx.query("select country from dim_charterers where contact_email like 'a%'")
+    assert isinstance(filtered, QueryRefused)
     assert isinstance(ctx.query("delete from dim_vessels"), QueryRefused)
 
 

@@ -54,6 +54,10 @@ class Warehouse(Protocol):
         """Comments and tags already stored in the warehouse."""
         ...
 
+    def refresh(self) -> None:
+        """Forget cached metadata so the next calls re-read it."""
+        ...
+
     def close(self) -> None: ...
 
 

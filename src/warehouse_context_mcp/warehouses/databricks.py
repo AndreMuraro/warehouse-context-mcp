@@ -23,10 +23,21 @@ _TRUTHY = frozenset({"true", "yes", "1", ""})  # a bare `pii` tag counts
 class DatabricksWarehouse(DbApiWarehouse[Named]):
     dialect = "databricks"
 
-    def __init__(self, connection: Connection[Named], catalog: str, schema: str) -> None:
+    def __init__(
+        self,
+        connection: Connection[Named],
+        catalog: str,
+        schema: str,
+        *,
+        require_pii_tags: bool = True,
+    ) -> None:
         self._catalog = validate_identifier(catalog).lower()
         self._schema = validate_identifier(schema).lower()
-        super().__init__(connection, Namespace(schema=schema, catalog=catalog))
+        super().__init__(
+            connection,
+            Namespace(schema=schema, catalog=catalog),
+            require_pii_tags=require_pii_tags,
+        )
 
     @classmethod
     def connect(cls, settings: DatabricksSettings) -> Self:
@@ -43,7 +54,12 @@ class DatabricksWarehouse(DbApiWarehouse[Named]):
             catalog=settings.catalog,
             schema=settings.schema_name,
         )
-        return cls(connection, settings.catalog, settings.schema_name)
+        return cls(
+            connection,
+            settings.catalog,
+            settings.schema_name,
+            require_pii_tags=settings.require_pii_tags,
+        )
 
     @override
     def _qualified(self, table: str) -> str:
@@ -87,17 +103,14 @@ class DatabricksWarehouse(DbApiWarehouse[Named]):
     @override
     def _pii_columns(self) -> dict[str, set[str]]:
         pii: dict[str, set[str]] = {}
-        try:
-            rows = self._fetch(
-                Statement(
-                    "select table_name, column_name, tag_value "
-                    f"from {self._catalog}.information_schema.column_tags "
-                    "where schema_name = :schema and lower(tag_name) = 'pii'",
-                    {"schema": self._schema},
-                )
+        rows = self._fetch(
+            Statement(
+                "select table_name, column_name, tag_value "
+                f"from {self._catalog}.information_schema.column_tags "
+                "where schema_name = :schema and lower(tag_name) = 'pii'",
+                {"schema": self._schema},
             )
-        except Exception:  # noqa: BLE001  column tags need Unity Catalog; degrade gracefully
-            return pii
+        )
         for table, column, value in rows:
             if str(value or "").lower() in _TRUTHY:
                 pii.setdefault(str(table).lower(), set()).add(str(column).lower())

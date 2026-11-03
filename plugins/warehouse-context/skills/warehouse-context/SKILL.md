@@ -30,10 +30,18 @@ Refusals come back as `{"ok": false, "error": ...}`; read the error and repair t
 
 - *only SELECT queries are allowed* / *exactly one statement*: send a single SELECT.
 - *unknown tables* or *outside the configured schema*: use a table from `list_tables`.
-- *column ... is marked PII*: the column cannot be read, filtered or grouped on. Use
-  `COUNT(DISTINCT col)` if a count answers the question; otherwise tell the user the data
-  is protected. Do not try to work around the rule.
-- *forbidden construct* or *function not allowed*: rewrite with plain SQL.
+- *column ... is marked PII*: PII columns come back as `***` when selected and cannot be
+  filtered, sorted, grouped or used in expressions. Use `COUNT(DISTINCT col)` if a count
+  answers the question; otherwise tell the user the data is protected. Do not try to work
+  around the rule.
+- *forbidden construct* or *function ... is not allowed*: the server only accepts plain SQL
+  (joins, CTEs, subqueries, window functions, common aggregates and date, text and math
+  functions). Rewrite without the construct named in the error.
+- *does not resolve*: use real column names from `describe_table`, qualified with a table
+  alias when several tables are joined.
+- *the warehouse rejected the query*: fix the SQL; details are withheld for tables with PII.
+- `"truncated": true` in a result: values or rows were cut to fit size limits; aggregate
+  instead of fetching raw rows.
 
 ## Rules
 

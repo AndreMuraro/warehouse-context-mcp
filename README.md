@@ -29,17 +29,19 @@ Comments and tags stored in the warehouse are merged with the curated YAML catal
 
 ## Guardrails
 
-Read-only is enforced in **three independent layers**, each tested on its own:
+Every query an agent sends is treated as written by an attacker, since agents can be prompt-injected by what they read. Protection comes in independent layers, each tested on its own:
 
-1. **Parsing, not string matching.** SQL is parsed with [sqlglot](https://github.com/tobymao/sqlglot). It must be exactly one statement whose root is a SELECT or a set operation, and no node in the tree may be a write, DDL, `SELECT … INTO`, or an unmodelled command (`COPY`, `ATTACH`, `PRAGMA`, `SET`).
-2. **Read-only connection.** DuckDB opens the file read-only; Snowflake and Databricks connect with a SELECT-only role or principal, so a guardrail bug still cannot write.
-3. **Bounded results.** A row limit is always applied (tightened if the query asks for more) and queries are interrupted after a timeout.
+1. **An allow-list query policy.** SQL is parsed with [sqlglot](https://github.com/tobymao/sqlglot) and must be exactly one SELECT built only from reviewed constructs and functions. Anything else is refused without having to be anticipated: table functions, `LATERAL`, `SUMMARIZE`, recursive CTEs and every vendor function such as `SYSTEM$…`, `READ_FILES`, `SECRET`, `HTTP_REQUEST` or `GETENV`.
+2. **Resolution against the real schema.** `*` is expanded and every column must resolve to a real column of a known table, through aliases, CTEs and subqueries; a whole row used as a value is refused.
+3. **PII masked inside the SQL.** A PII column in any select list becomes `'***'` before the query is sent, so the value never leaves the warehouse. It can be counted (`COUNT(DISTINCT email)`), but filtering, sorting, grouping or computing on it is refused, so its values cannot be guessed one test at a time.
+4. **A locked-down connection.** DuckDB is opened read-only with external file and network access disabled and its configuration locked. Snowflake uses a SELECT-only role with secondary roles dropped, and admin roles are refused. Databricks uses a principal with only `USE` and `SELECT` grants.
+5. **Bounded execution and results.** Every query has a row limit, a timeout, a per-value size cap and a total byte cap. Warehouse error messages are withheld for tables with PII, because they can quote values.
 
-**Scope**: queries may only touch tables in the configured schema. Anything qualified with another database or schema is refused, and unqualified names are rewritten to fully qualified ones, so a query never depends on the session's default schema.
+**Scope:** only tables in the configured schema; names are compared after the dialect's own case rules and every table is fully qualified in the SQL that runs.
 
-**PII**: columns flagged `pii: true` in the catalog can be counted (`COUNT(DISTINCT email)`) but never read, filtered on or grouped by, including through aliases and subqueries. `SELECT *` is allowed; PII values come back masked.
+**PII tags** stored in the warehouse (Snowflake tags, Unity Catalog column tags) are merged with the curated catalog, must be readable at startup (fail closed), and are refreshed every 10 minutes. For production data, also use warehouse-native masking (masking policies or column masks): the server's masking is defence in depth.
 
-See [docs/adr/0001-read-only-by-construction.md](docs/adr/0001-read-only-by-construction.md) for the reasoning.
+The queries an independent review used to break an earlier version live in [`tests/attacks/`](tests/attacks) and run on every commit. See the [threat model](docs/threat-model.md), [ADR 0004](docs/adr/0004-fail-closed-query-policy.md) and [SECURITY.md](SECURITY.md).
 
 ## Quick start
 

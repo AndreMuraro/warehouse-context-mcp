@@ -29,6 +29,15 @@ _COMMON = SettingsConfigDict(
 )
 
 
+DATABRICKS_DOMAINS = (
+    ".cloud.databricks.com",
+    ".gcp.databricks.com",
+    ".azuredatabricks.net",
+    ".databricks.us",
+    ".databricks.azure.us",
+)
+
+
 class _EnvSettings(BaseSettings):
     @classmethod
     def from_env(cls, env_file: Path | None = Path(".env")) -> Self:
@@ -65,8 +74,11 @@ class SnowflakeSettings(_EnvSettings):
     database: str = "WCM_DEMO"
     schema_name: str = Field(default="SHIPPING", validation_alias="SNOWFLAKE_SCHEMA")
     private_key_path: Path | None = None
+    private_key_passphrase: SecretStr | None = None
     password: SecretStr | None = None
     statement_timeout_s: int = Field(default=60, gt=0)
+    require_pii_tags: bool = True
+    """Refuse to start if PII tags cannot be read (needs Enterprise edition and grants)."""
 
     @model_validator(mode="after")
     def _connection_or_account(self) -> Self:
@@ -91,8 +103,23 @@ class DatabricksSettings(_EnvSettings):
     token: SecretStr
     catalog: str = "workspace"
     schema_name: str = Field(default="wcm_demo", validation_alias="DATABRICKS_SCHEMA")
+    require_pii_tags: bool = True
+    """Refuse to start if Unity Catalog column tags cannot be read."""
+    allow_custom_host: bool = False
+    """Accept a host outside the Databricks cloud domains (private link, proxies)."""
 
     @field_validator("host")
     @classmethod
     def _bare_hostname(cls, value: str) -> str:
-        return value.removeprefix("https://").rstrip("/")
+        return value.removeprefix("https://").rstrip("/").lower()
+
+    @model_validator(mode="after")
+    def _databricks_domain(self) -> Self:
+        # The token is sent to this host: a planted .env must not be able to redirect it.
+        if not self.allow_custom_host and not self.host.endswith(DATABRICKS_DOMAINS):
+            msg = (
+                f"DATABRICKS_HOST {self.host!r} is not a Databricks domain; set "
+                "DATABRICKS_ALLOW_CUSTOM_HOST=true if that is intended"
+            )
+            raise ValueError(msg)
+        return self

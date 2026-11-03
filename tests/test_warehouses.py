@@ -3,6 +3,7 @@
 import os
 from collections.abc import Sequence
 from pathlib import Path
+from typing import override
 
 import pytest
 
@@ -36,6 +37,8 @@ class FakeCursor:
     def execute(self, operation: str, parameters: object = None, /) -> None:
         self._log.append((operation, parameters))
         sql = " ".join(operation.lower().split())
+        if sql == "use secondary roles none":
+            return
         for needle, rows in self._routes:
             if needle in sql:
                 self._rows = rows
@@ -74,7 +77,7 @@ SNOWFLAKE_ROUTES: Routes = [
         [("CHARTERER_ID", "NUMBER", "NO"), ("CONTACT_EMAIL", "TEXT", "YES")],
     ),
     ("select count(*)", [(12,)]),
-    ("dim_charterers limit", [("MR", "ops1@x.example")]),
+    ('"dim_charterers" limit', [("MR", "ops1@x.example")]),
 ]
 
 
@@ -113,8 +116,14 @@ def test_snowflake_tag_pii_masks_results_end_to_end(snowflake: SnowflakeWarehous
     res = ctx.query("select * from dim_charterers")
     assert isinstance(res, QueryAccepted)
     assert res.rows == [{"vessel_class": "MR", "contact_email": MASK}]
-    assert "WCM_DEMO.SHIPPING.dim_charterers".lower() in res.sql_executed.lower()
-    assert isinstance(ctx.query("select contact_email from dim_charterers"), QueryRefused)
+    assert '"wcm_demo"."shipping"."dim_charterers"' in res.sql_executed.lower()
+    assert "'***' as \"contact_email\"" in res.sql_executed.lower()  # masked in the SQL
+    explicit = ctx.query("select contact_email from dim_charterers")
+    assert isinstance(explicit, QueryAccepted)
+    assert explicit.sql_executed.startswith("SELECT '***' AS")
+    assert isinstance(
+        ctx.query("select country from dim_charterers order by contact_email"), QueryRefused
+    )
 
 
 def test_rejects_tables_outside_the_configured_schema(snowflake: SnowflakeWarehouse) -> None:
@@ -266,3 +275,27 @@ def test_unsafe_or_incomplete_sessions_are_refused(
 ) -> None:
     with pytest.raises(ConfigurationError, match=problem):
         SnowflakeWarehouse.from_session(FakeConnection([("current_role()", [session])]))
+
+
+class UntaggedSnowflake(SnowflakeWarehouse):
+    @override
+    def _pii_columns(self) -> dict[str, set[str]]:
+        msg = "insufficient privileges on tag references"
+        raise RuntimeError(msg)
+
+
+def test_unreadable_pii_tags_fail_closed() -> None:
+    strict = UntaggedSnowflake(FakeConnection(SNOWFLAKE_ROUTES), "wcm_demo", "shipping")
+    with pytest.raises(ConfigurationError, match="could not read PII tags"):
+        WarehouseContext(strict)
+
+    lenient = UntaggedSnowflake(
+        FakeConnection(SNOWFLAKE_ROUTES), "wcm_demo", "shipping", require_pii_tags=False
+    )
+    assert lenient.native_catalog().table("dim_charterers").pii_columns == frozenset()
+
+
+def test_sessions_drop_secondary_roles_before_anything_else() -> None:
+    con = FakeConnection([("current_role()", [("WCM_READER", "WCM_DEMO", "SHIPPING")])])
+    SnowflakeWarehouse.from_session(con)
+    assert con.log[0][0] == "use secondary roles none"
