@@ -1,0 +1,28 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.AndreMuraro/warehouse-context-mcp",
+  "title": "Warehouse Context",
+  "description": "Governed warehouse context for agents: docs, lineage, freshness and read-only, PII-safe SQL.",
+  "repository": {
+    "url": "https://github.com/AndreMuraro/warehouse-context-mcp",
+    "source": "github"
+  },
+  "version": "0.4.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "warehouse-context-mcp",
+      "version": "0.4.0",
+      "runtimeHint": "uvx",
+      "transport": { "type": "stdio" },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "--demo",
+          "description": "Serve the bundled synthetic warehouse; see the README for Snowflake and Databricks"
+        }
+      ]
+    }
+  ]
+}

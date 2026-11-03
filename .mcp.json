@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "warehouse-demo": {
+      "command": "uv",
+      "args": ["run", "--quiet", "warehouse-context-mcp", "--demo"]
+    }
+  }
+}

@@ -9,6 +9,7 @@ from pathlib import Path
 import uvicorn
 
 from . import __version__
+from .demo import ensure_demo
 from .domain.catalog import Catalog
 from .domain.errors import ConfigurationError
 from .server import build_server, http_app
@@ -34,6 +35,11 @@ def _parser() -> argparse.ArgumentParser:
         help="snowflake and databricks read SNOWFLAKE_* / DATABRICKS_* settings",
     )
     parser.add_argument("--duckdb", type=Path, help="DuckDB database file (duckdb backend)")
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="serve the bundled synthetic warehouse, built on first use (no setup needed)",
+    )
     parser.add_argument("--catalog", type=Path, help="curated catalog YAML file")
     parser.add_argument("--max-rows", type=int, default=200, help="hard cap on rows returned")
     parser.add_argument(
@@ -61,7 +67,13 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.demo:
+        if args.duckdb or args.backend is not Backend.DUCKDB:
+            parser.error("--demo cannot be combined with --duckdb or another --backend")
+        args.duckdb, demo_catalog = ensure_demo()
+        args.catalog = args.catalog or demo_catalog
     try:
         warehouse = open_warehouse(args.backend, duckdb_path=args.duckdb, env_file=args.env_file)
     except ConfigurationError as err:

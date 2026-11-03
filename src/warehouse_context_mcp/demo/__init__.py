@@ -1,23 +1,34 @@
-"""Build a small, fully synthetic shipping warehouse for demos and tests.
+"""A small, fully synthetic shipping warehouse for demos and tests.
 
-Usage: uv run examples/build_demo.py examples/demo.duckdb
 Every value is generated from a fixed seed; no real vessels, companies or people.
+
+    python -m warehouse_context_mcp.demo DIR    # writes DIR/demo.duckdb and DIR/catalog.yaml
 """
 
+import os
 import random
+import shutil
 import sys
-from datetime import datetime, timedelta
+import tempfile
+from datetime import UTC, datetime, timedelta
+from importlib.resources import files
 from pathlib import Path
 
 import duckdb
+
+from warehouse_context_mcp import __version__
+
+DATABASE = "demo.duckdb"
+CATALOG = "catalog.yaml"
 
 PORTS = ["Rotterdam", "Singapore", "Houston", "Santos", "Fujairah", "Ningbo", "Antwerp", "Durban"]
 CLASSES = ["VLCC", "Suezmax", "Aframax", "LR2", "MR"]
 
 
 def build(path: Path, now: datetime | None = None) -> None:
-    rng = random.Random(42)
-    now = now or datetime(2026, 11, 1, 12, 0, 0)  # noqa: DTZ001  naive UTC, like most warehouses
+    rng = random.Random(42)  # noqa: S311  reproducible synthetic data, not security
+    # Naive UTC timestamps, like most warehouses.
+    now = now or datetime.now(UTC).replace(tzinfo=None)
     con = duckdb.connect(str(path))
     for t in ["fct_voyage_economics", "stg_voyages", "dim_vessels", "dim_charterers"]:
         con.execute(f"drop table if exists {t}")
@@ -87,5 +98,43 @@ def build(path: Path, now: datetime | None = None) -> None:
     con.close()
 
 
+def ensure_demo(directory: Path | None = None) -> tuple[Path, Path]:
+    """Return the demo database and catalog paths, building them on first use.
+
+    The default location is a per-version folder in the system temp directory, or
+    ``WCM_DEMO_DIR``. Each file is written under a temporary name and renamed into place,
+    so two clients starting at once never read a half-written file.
+    """
+    target = directory or default_demo_dir()
+    target.mkdir(parents=True, exist_ok=True)
+    database = target / DATABASE
+    if not database.exists():
+        fd, partial = tempfile.mkstemp(dir=target, suffix=".duckdb")
+        os.close(fd)
+        Path(partial).unlink()  # DuckDB wants to create the file itself
+        try:
+            build(Path(partial))
+            Path(partial).replace(database)
+        finally:
+            Path(partial).unlink(missing_ok=True)
+    catalog = target / CATALOG
+    if not catalog.exists():
+        fd, partial = tempfile.mkstemp(dir=target, suffix=".yaml")
+        try:
+            with files(__package__).joinpath(CATALOG).open("rb") as src, os.fdopen(fd, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            Path(partial).replace(catalog)
+        finally:
+            Path(partial).unlink(missing_ok=True)
+    return database, catalog
+
+
+def default_demo_dir() -> Path:
+    if configured := os.environ.get("WCM_DEMO_DIR"):
+        return Path(configured)
+    return Path(tempfile.gettempdir()) / "warehouse-context-mcp" / __version__
+
+
 if __name__ == "__main__":
-    build(Path(sys.argv[1] if len(sys.argv) > 1 else "examples/demo.duckdb"))
+    db, cat = ensure_demo(Path(sys.argv[1]) if len(sys.argv) > 1 else None)
+    print(f"{db}\n{cat}")  # noqa: T201

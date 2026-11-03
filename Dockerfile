@@ -33,9 +33,7 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --all-extras --no-editable
 
-RUN mkdir -p /opt/demo \
- && /opt/venv/bin/python examples/build_demo.py /opt/demo/demo.duckdb \
- && cp examples/catalog.yaml /opt/demo/catalog.yaml
+RUN /opt/venv/bin/python -m warehouse_context_mcp.demo /opt/demo
 
 # --- runtime: no build tools, no uv, no source tree --------------------------------------------
 FROM python:${PYTHON_VERSION}-slim AS runtime
@@ -43,7 +41,8 @@ FROM python:${PYTHON_VERSION}-slim AS runtime
 LABEL org.opencontainers.image.title="warehouse-context-mcp" \
       org.opencontainers.image.description="Governed, read-only warehouse context for AI agents over MCP" \
       org.opencontainers.image.source="https://github.com/AndreMuraro/warehouse-context-mcp" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="MIT" \
+      io.modelcontextprotocol.server.name="io.github.AndreMuraro/warehouse-context-mcp"
 
 RUN groupadd --system --gid 10001 app \
  && useradd --system --uid 10001 --gid app --create-home --home-dir /home/app app

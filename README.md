@@ -1,5 +1,7 @@
 # warehouse-context-mcp
 
+<!-- mcp-name: io.github.AndreMuraro/warehouse-context-mcp -->
+
 An [MCP](https://modelcontextprotocol.io) server that gives AI agents **trustworthy, governed context about a data warehouse**: what each table means, where it comes from, how fresh it is, and a way to query it that cannot write, cannot run away, and cannot leak personal data.
 
 Coding and analytics agents are good at SQL and bad at knowing *which* table to trust. Schema alone does not tell them that `fct_voyage_economics` is the governed source for TCE, that `stg_voyages` is staging, that `contact_email` is personal data, or that a table stopped updating two days ago. This server puts that context one tool call away, and puts guardrails around everything else.
@@ -41,22 +43,40 @@ See [docs/adr/0001-read-only-by-construction.md](docs/adr/0001-read-only-by-cons
 
 ## Quick start
 
-Requires [uv](https://docs.astral.sh/uv/) and Python 3.14 or 3.15 (uv installs it if missing).
+Try it without cloning (needs [uv](https://docs.astral.sh/uv/)); `--demo` serves a bundled, fully synthetic shipping warehouse that is built on first run:
 
 ```bash
-uv sync                                         # creates .venv from uv.lock
-uv run examples/build_demo.py examples/demo.duckdb   # fully synthetic shipping data
-uv run pytest
+uvx --from git+https://github.com/AndreMuraro/warehouse-context-mcp warehouse-context-mcp --demo
 ```
 
-Connect it to Claude Code:
+Once released to PyPI this becomes `uvx warehouse-context-mcp --demo`.
 
-```bash
-claude mcp add warehouse -- uv run --directory "$PWD" warehouse-context-mcp \
-  --duckdb examples/demo.duckdb --catalog examples/catalog.yaml
-```
+### Use it from your MCP client
+
+**Clone the repository and it is already configured:** `.mcp.json` (Claude Code), `.vscode/mcp.json` (VS Code) and `.codex/config.toml` (Codex) each start the demo server. Each client asks before trusting a project's servers.
+
+To add it everywhere instead:
+
+| Client | Command or config |
+| --- | --- |
+| Claude Code | `claude mcp add --scope user warehouse -- uvx warehouse-context-mcp --demo` |
+| Claude Desktop | `claude_desktop_config.json`: `"warehouse": {"command": "uvx", "args": ["warehouse-context-mcp", "--demo"]}` under `mcpServers` |
+| VS Code | user `mcp.json`: `"warehouse": {"type": "stdio", "command": "uvx", "args": ["warehouse-context-mcp", "--demo"]}` under `servers` |
+| Codex | `codex mcp add warehouse -- uvx warehouse-context-mcp --demo` |
+| Any client, over HTTP | `docker compose up`, then point it at `http://127.0.0.1:8000/mcp` |
+
+Replace `--demo` with `--backend snowflake` or `--backend databricks` (and the settings below) for a real warehouse.
 
 Then ask: *"Which vessel class had the best average TCE last quarter, and is that table fresh?"*
+
+### Development
+
+Requires uv; it installs Python 3.14 if missing.
+
+```bash
+uv sync --all-extras                            # creates .venv from uv.lock
+uv run pytest
+```
 
 ### Snowflake or Databricks
 
@@ -64,7 +84,7 @@ Then ask: *"Which vessel class had the best average TCE last quarter, and is tha
 uv sync --extra snowflake                # or --extra databricks, or --all-extras
 cp .env.example .env                     # fill in your own values; .env is git-ignored
 # run examples/snowflake_demo.sql (or databricks_demo.sql) once in the warehouse
-uv run warehouse-context-mcp --backend snowflake --catalog examples/catalog.yaml
+uv run warehouse-context-mcp --backend snowflake --catalog path/to/catalog.yaml
 ```
 
 Settings come from `SNOWFLAKE_*` / `DATABRICKS_*` environment variables or `./.env`; real environment variables win, and blank values count as unset. Key-pair auth for Snowflake: `uv run scripts/snowflake_keypair.py` prints the one `ALTER USER` statement to run.
@@ -112,8 +132,7 @@ On the Databricks Free Edition the personal access token belongs to the workspac
 By default the server speaks MCP over stdio: the client launches it. With `--transport http` it runs as a long-lived Streamable HTTP service instead, with stateless JSON responses and a `/healthz` endpoint:
 
 ```bash
-uv run warehouse-context-mcp --duckdb examples/demo.duckdb --catalog examples/catalog.yaml \
-  --transport http --port 8000
+uv run warehouse-context-mcp --demo --transport http --port 8000
 claude mcp add --transport http warehouse http://127.0.0.1:8000/mcp
 ```
 
@@ -143,7 +162,7 @@ CI builds the image, checks the stdio transport, brings the Compose service up u
 
 ## The catalog
 
-Meaning lives in a YAML file reviewed in Git like code ([example](examples/catalog.yaml)):
+Meaning lives in a YAML file reviewed in Git like code ([the demo's catalog](src/warehouse_context_mcp/demo/catalog.yaml)):
 
 ```yaml
 tables:
@@ -164,6 +183,7 @@ In production it would be generated from dbt docs, Unity Catalog comments or a d
 
 ```
 src/warehouse_context_mcp/
+├── demo/          the bundled synthetic warehouse and its catalog
 ├── domain/        catalog, result models, namespace, errors (no I/O beyond YAML)
 ├── guardrails/    QueryPolicy: parse, scope, PII rules, row limit; result masking
 ├── warehouses/    Warehouse protocol + DuckDB, Snowflake, Databricks adapters
@@ -197,7 +217,7 @@ CI runs the same on Python 3.14 and 3.15 (Linux) and 3.14 (Windows), and builds 
 - [x] v0.1: DuckDB adapter, catalog, six tools, three-layer guardrails, tests, CI
 - [x] v0.2: Snowflake and Databricks Unity Catalog adapters, native comments and PII tags, schema scoping
 - [x] v0.3: Python 3.14+, uv, ruff and ty; layered package; typed tool inputs and outputs; table names qualified by the policy
-- [x] v0.4: Streamable HTTP transport, hardened container image and Compose setup, Snowflake CLI connections
+- [x] v0.4: Streamable HTTP transport, hardened container image and Compose setup, Snowflake CLI connections, zero-setup `--demo`, client configs, PyPI and MCP Registry release pipeline
 - [ ] Catalog import from dbt `manifest.json`
 - [ ] Evaluation: 20 analyst questions answered with and without the server, scored for correctness and table choice
 - [ ] Per-tool audit log

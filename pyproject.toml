@@ -60,7 +60,7 @@ default-groups = ["dev"]
 [tool.ruff]
 line-length = 100
 target-version = "py314"
-src = ["src", "tests", "examples"]
+src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -80,7 +80,6 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "PLR2004", "SLF001", "INP001", "D"]
-"examples/**" = ["INP001", "T201", "S311", "D"]
 "scripts/**" = ["INP001", "T201", "D"]
 
 [tool.ruff.lint.pydocstyle]
@@ -96,10 +95,9 @@ docstring-code-format = true
 
 [tool.ty.environment]
 python-version = "3.14"
-extra-paths = ["examples"]
 
 [tool.ty.src]
-include = ["src", "tests", "examples", "scripts"]
+include = ["src", "tests", "scripts"]
 
 [tool.ty.rules]
 # Fail on anything ty is unsure about, not only definite errors.
@@ -121,7 +119,6 @@ rules = { unresolved-import = "ignore" }
 [tool.pytest]
 minversion = "9.0"
 testpaths = ["tests"]
-pythonpath = ["examples"]
 addopts = ["--strict-markers", "--strict-config", "-ra"]
 markers = ["live: needs real warehouse credentials in the environment"]
 filterwarnings = ["error"]

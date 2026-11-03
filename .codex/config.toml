@@ -1,0 +1,6 @@
+# Project-scoped MCP servers for Codex (applies when this project is trusted).
+# Start Codex from the repository root so `uv run` finds this project.
+
+[mcp_servers.warehouse-demo]
+command = "uv"
+args = ["run", "--quiet", "warehouse-context-mcp", "--demo"]

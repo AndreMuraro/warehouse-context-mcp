@@ -1,0 +1,16 @@
+{
+  "servers": {
+    "warehouse-demo": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "${workspaceFolder}",
+        "--quiet",
+        "warehouse-context-mcp",
+        "--demo"
+      ]
+    }
+  }
+}
