@@ -122,6 +122,9 @@ def ensure_demo(directory: Path | None = None) -> tuple[Path, Path]:
         try:
             with files(__package__).joinpath(CATALOG).open("rb") as src, os.fdopen(fd, "wb") as dst:
                 shutil.copyfileobj(src, dst)
+            # mkstemp creates owner-only files; the catalog is not secret, and in the image it
+            # is built as root but read by an unprivileged user.
+            Path(partial).chmod(0o644)
             Path(partial).replace(catalog)
         finally:
             Path(partial).unlink(missing_ok=True)

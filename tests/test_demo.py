@@ -1,5 +1,7 @@
 """The bundled demo: zero-setup for MCP clients, safe when several start at once."""
 
+import os
+import stat
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -56,3 +58,10 @@ def test_module_entry_point_used_by_the_dockerfile(tmp_path: Path) -> None:
         text=True,
     ).stdout.split()
     assert out == [str(tmp_path / "demo.duckdb"), str(tmp_path / "catalog.yaml")]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
+def test_demo_files_are_readable_by_other_users(tmp_path: Path) -> None:
+    """Built as root in the image, read by an unprivileged user at runtime."""
+    for path in ensure_demo(tmp_path):
+        assert path.stat().st_mode & stat.S_IROTH, path
