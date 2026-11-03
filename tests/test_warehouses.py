@@ -1,5 +1,6 @@
 """Snowflake and Databricks adapters against a fake DB-API connection (no credentials)."""
 
+import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from warehouse_context_mcp.guardrails import MASK
 from warehouse_context_mcp.service import WarehouseContext
 from warehouse_context_mcp.settings import SnowflakeSettings
 from warehouse_context_mcp.warehouses import DatabricksWarehouse, SnowflakeWarehouse
+from warehouse_context_mcp.warehouses.snowflake import connect_arguments
 
 type Routes = list[tuple[str, list[tuple[object, ...]]]]
 
@@ -62,6 +64,7 @@ class FakeConnection:
 
 
 SNOWFLAKE_ROUTES: Routes = [
+    ("current_role()", [("WCM_READER", "WCM_DEMO", "SHIPPING")]),
     ("tag_references_all_columns", [("CONTACT_EMAIL", "PII", "true")]),
     ("select table_name, comment", [("DIM_CHARTERERS", "Companies that charter vessels.")]),
     ("select table_name, column_name, comment", [("DIM_CHARTERERS", "COUNTRY", "ISO country")]),
@@ -189,8 +192,7 @@ def test_snowflake_connect_arguments_pass_the_drivers_own_checks(
         return FakeConnection(SNOWFLAKE_ROUTES)
 
     monkeypatch.setattr(connector, "connect", fake_connect)
-    for key in ("PASSWORD", "PRIVATE_KEY_PATH", "SCHEMA", "DATABASE"):
-        monkeypatch.delenv(f"SNOWFLAKE_{key}", raising=False)
+    clear_snowflake_env(monkeypatch)
     env = tmp_path / ".env"
     env.write_text("SNOWFLAKE_ACCOUNT=org-acct\nSNOWFLAKE_USER=me\n", encoding="utf-8")
 
@@ -198,3 +200,69 @@ def test_snowflake_connect_arguments_pass_the_drivers_own_checks(
 
     assert captured["authenticator"] == "externalbrowser"
     assert captured["database"] == "WCM_DEMO"
+
+
+def clear_snowflake_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in [k for k in os.environ if k.startswith("SNOWFLAKE_")]:
+        monkeypatch.delenv(key)
+
+
+def settings_from(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, lines: str) -> SnowflakeSettings:
+    clear_snowflake_env(monkeypatch)
+    env = tmp_path / ".env"
+    env.write_text(lines, encoding="utf-8")
+    return SnowflakeSettings.from_env(env)
+
+
+def test_account_mode_passes_every_setting_and_defaults_to_browser_sign_in(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    args = connect_arguments(
+        settings_from(monkeypatch, tmp_path, "SNOWFLAKE_ACCOUNT=a\nSNOWFLAKE_USER=u\n")
+    )
+    assert "connection_name" not in args
+    assert args["role"] == "WCM_READER"
+    assert args["schema"] == "SHIPPING"
+    assert args["authenticator"] == "externalbrowser"
+
+
+def test_cli_connection_mode_lets_the_profile_supply_what_is_not_set(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    args = connect_arguments(
+        settings_from(
+            monkeypatch, tmp_path, "SNOWFLAKE_CONNECTION_NAME=wcm\nSNOWFLAKE_ROLE=WCM_READER\n"
+        )
+    )
+    assert args["connection_name"] == "wcm"
+    assert args["role"] == "WCM_READER"  # set explicitly, so it overrides the profile
+    for from_profile in ("account", "user", "database", "schema", "authenticator"):
+        assert from_profile not in args
+
+
+def test_settings_need_a_connection_name_or_an_account(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    with pytest.raises(ConfigurationError, match="SNOWFLAKE_CONNECTION_NAME"):
+        settings_from(monkeypatch, tmp_path, "SNOWFLAKE_ACCOUNT=a\n")
+
+
+def test_session_values_define_the_namespace() -> None:
+    routes: Routes = [("current_role()", [("WCM_READER", "OTHER_DB", "SALES")])]
+    wh = SnowflakeWarehouse.from_session(FakeConnection(routes))
+    assert str(wh.namespace) == "other_db.sales"
+
+
+@pytest.mark.parametrize(
+    ("session", "problem"),
+    [
+        (("ACCOUNTADMIN", "WCM_DEMO", "SHIPPING"), "SELECT-only role"),
+        (("sysadmin", "WCM_DEMO", "SHIPPING"), "SELECT-only role"),
+        (("WCM_READER", None, None), "no current database"),
+    ],
+)
+def test_unsafe_or_incomplete_sessions_are_refused(
+    session: tuple[object, ...], problem: str
+) -> None:
+    with pytest.raises(ConfigurationError, match=problem):
+        SnowflakeWarehouse.from_session(FakeConnection([("current_role()", [session])]))

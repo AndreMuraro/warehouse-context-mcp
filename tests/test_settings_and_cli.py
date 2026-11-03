@@ -8,7 +8,15 @@ from warehouse_context_mcp.settings import DatabricksSettings, SnowflakeSettings
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key in ("ACCOUNT", "USER", "PASSWORD", "SCHEMA", "ROLE", "PRIVATE_KEY_PATH"):
+    for key in (
+        "ACCOUNT",
+        "USER",
+        "PASSWORD",
+        "SCHEMA",
+        "ROLE",
+        "PRIVATE_KEY_PATH",
+        "CONNECTION_NAME",
+    ):
         monkeypatch.delenv(f"SNOWFLAKE_{key}", raising=False)
     for key in ("HOST", "HTTP_PATH", "TOKEN", "CATALOG", "SCHEMA"):
         monkeypatch.delenv(f"DATABRICKS_{key}", raising=False)

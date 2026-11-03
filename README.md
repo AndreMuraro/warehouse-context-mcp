@@ -69,6 +69,26 @@ uv run warehouse-context-mcp --backend snowflake --catalog examples/catalog.yaml
 
 Settings come from `SNOWFLAKE_*` / `DATABRICKS_*` environment variables or `./.env`; real environment variables win, and blank values count as unset. Key-pair auth for Snowflake: `uv run scripts/snowflake_keypair.py` prints the one `ALTER USER` statement to run.
 
+#### Sharing a Snowflake CLI connection
+
+If you use [Snowflake CLI](https://docs.snowflake.com/en/developer-guide/snowflake-cli/index), point the server at one of its connections instead of repeating the account and sign-in details:
+
+```toml
+# connections.toml (~/.snowflake/, or %USERPROFILE%\AppData\Local\snowflake\ on Windows)
+[wcm]
+account = "orgname-accountname"
+user = "you"
+authenticator = "SNOWFLAKE_JWT"
+private_key_file = "~/.snowflake/snowflake_key.p8"
+```
+
+```bash
+snow sql -c wcm -f examples/snowflake_demo.sql      # one-time demo setup, as an admin role
+SNOWFLAKE_CONNECTION_NAME=wcm SNOWFLAKE_ROLE=WCM_READER uv run warehouse-context-mcp --backend snowflake
+```
+
+The connection supplies the account and sign-in; any `SNOWFLAKE_*` value you set overrides it, and this package's defaults never do. After connecting, the server adopts the session's actual database and schema, and refuses admin roles (`ACCOUNTADMIN`, `SYSADMIN`, …), so a CLI connection kept for admin work cannot bypass the SELECT-only role.
+
 Live tests run the demo expectations against a real warehouse and are skipped otherwise:
 
 ```bash

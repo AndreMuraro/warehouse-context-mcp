@@ -1,7 +1,9 @@
 """Snowflake adapter (``snowflake`` extra).
 
 Connect with a role that only holds SELECT, such as ``WCM_READER`` from
-``examples/snowflake_demo.sql``: that role is the connection-level read-only layer.
+``examples/snowflake_demo.sql``: that role is the connection-level read-only layer, and
+admin roles are refused. Settings come from ``SNOWFLAKE_*`` variables, from a Snowflake CLI
+connection (``SNOWFLAKE_CONNECTION_NAME``), or both.
 """
 
 # Catalog SQL interpolates only identifiers checked by validate_identifier; values are bound.
@@ -18,6 +20,47 @@ from .base import validate_identifier
 from .dbapi import Connection, Cursor, DbApiWarehouse, Positional, Statement
 
 _TRUTHY = frozenset({"true", "yes", "1"})
+
+ADMIN_ROLES = frozenset({"ACCOUNTADMIN", "ORGADMIN", "SECURITYADMIN", "SYSADMIN", "USERADMIN"})
+
+_SESSION_FIELDS = {
+    "account": "account",
+    "user": "user",
+    "role": "role",
+    "warehouse": "warehouse",
+    "database": "database",
+    "schema_name": "schema",
+}
+
+
+def connect_arguments(settings: SnowflakeSettings) -> dict[str, object]:
+    """Keyword arguments for ``snowflake.connector.connect``, kept free of I/O for testing.
+
+    With a connection name, only values actually set in the environment are passed, so they
+    override the named connection while this package's defaults never do.
+    """
+    args: dict[str, object] = {
+        "session_parameters": {
+            "STATEMENT_TIMEOUT_IN_SECONDS": settings.statement_timeout_s,
+            "QUERY_TAG": "warehouse-context-mcp",
+        },
+        # Explicit, because connector 5.x warns when it is left to default. The server
+        # never runs async queries, so always log the session out on close.
+        "enable_server_session_keep_alive_auto_detection": False,
+    }
+    if settings.connection_name:
+        args["connection_name"] = settings.connection_name
+    for field, argument in _SESSION_FIELDS.items():
+        if settings.is_set(field) or not settings.connection_name:
+            args[argument] = getattr(settings, field)
+
+    if settings.private_key_path:
+        args["private_key_file"] = str(settings.private_key_path)
+    elif settings.password:
+        args["password"] = settings.password.get_secret_value()
+    elif not settings.connection_name:
+        args["authenticator"] = "externalbrowser"
+    return args
 
 
 class SnowflakeWarehouse(DbApiWarehouse[Positional]):
@@ -39,34 +82,41 @@ class SnowflakeWarehouse(DbApiWarehouse[Positional]):
             )
             raise ConfigurationError(msg) from err
 
-        auth: dict[str, object]
-        if settings.private_key_path:
-            auth = {"private_key_file": str(settings.private_key_path)}
-        elif settings.password:
-            auth = {"password": settings.password.get_secret_value()}
-        else:
-            auth = {"authenticator": "externalbrowser"}
-        connection = snowflake.connector.connect(
-            account=settings.account,
-            user=settings.user,
-            role=settings.role,
-            warehouse=settings.warehouse,
-            database=settings.database,
-            schema=settings.schema_name,
-            session_parameters={
-                "STATEMENT_TIMEOUT_IN_SECONDS": settings.statement_timeout_s,
-                "QUERY_TAG": "warehouse-context-mcp",
-            },
-            # Explicit, because connector 5.x warns when it is left to default. The server
-            # never runs async queries, so always log the session out on close.
-            enable_server_session_keep_alive_auto_detection=False,
-            **auth,
-        )
         # The driver types cursor() as SnowflakeCursor | DictCursor; DictCursor is only
         # returned when cursor_class=DictCursor is passed, which this package never does.
-        return cls(
-            cast("Connection[Positional]", connection), settings.database, settings.schema_name
+        connection = cast(
+            "Connection[Positional]", snowflake.connector.connect(**connect_arguments(settings))
         )
+        return cls.from_session(connection)
+
+    @classmethod
+    def from_session(cls, connection: Connection[Positional]) -> Self:
+        """Adopt the role, database and schema the session actually has.
+
+        A Snowflake CLI connection may carry its own defaults, so the session is the source
+        of truth. Admin roles are refused: the read-only layer is a SELECT-only role.
+        """
+        cursor = connection.cursor()
+        try:
+            cursor.execute("select current_role(), current_database(), current_schema()")
+            role, database, schema = (str(v or "") for v in cursor.fetchall()[0])
+        finally:
+            cursor.close()
+        problem = None
+        if role.upper() in ADMIN_ROLES:
+            problem = (
+                f"the session role is {role}; connect with a SELECT-only role such as "
+                "WCM_READER (set SNOWFLAKE_ROLE)"
+            )
+        elif not (database and schema):
+            problem = (
+                "the session has no current database and schema; set SNOWFLAKE_DATABASE and "
+                "SNOWFLAKE_SCHEMA or add them to the connection"
+            )
+        if problem:
+            connection.close()
+            raise ConfigurationError(problem)
+        return cls(connection, database, schema)
 
     @override
     def _qualified(self, table: str) -> str:

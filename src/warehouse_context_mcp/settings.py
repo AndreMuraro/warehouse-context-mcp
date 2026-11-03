@@ -4,11 +4,14 @@ Real environment variables win over the file. Empty values count as unset, so a 
 ``.env`` with blank secrets behaves as if those lines were absent.
 """
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Self
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .domain.errors import ConfigurationError
 
 _COMMON = SettingsConfigDict(
     env_file=".env",
@@ -22,14 +25,34 @@ _COMMON = SettingsConfigDict(
 class _EnvSettings(BaseSettings):
     @classmethod
     def from_env(cls, env_file: Path | None = Path(".env")) -> Self:
-        return cls(_env_file=env_file)
+        try:
+            return cls(_env_file=env_file)
+        except ValidationError as err:
+            problems = "; ".join(_describe(e) for e in err.errors())
+            msg = f"invalid {cls.__name__.removesuffix('Settings')} settings: {problems}"
+            raise ConfigurationError(msg) from err
+
+
+def _describe(error: Mapping[str, object]) -> str:
+    loc = error.get("loc")
+    field = ".".join(str(p) for p in loc) if isinstance(loc, tuple) else ""
+    message = str(error.get("msg", "")).removeprefix("Value error, ")
+    return f"{field}: {message}" if field else message
 
 
 class SnowflakeSettings(_EnvSettings):
+    """Either a Snowflake CLI connection name, or an account and user.
+
+    With ``SNOWFLAKE_CONNECTION_NAME``, the named connection from Snowflake CLI's
+    ``connections.toml`` supplies the account and sign-in method. Any other value set here
+    overrides it; the defaults below do not.
+    """
+
     model_config = _COMMON | SettingsConfigDict(env_prefix="SNOWFLAKE_")
 
-    account: str
-    user: str
+    connection_name: str | None = None
+    account: str | None = None
+    user: str | None = None
     role: str = "WCM_READER"
     warehouse: str = "WCM_XS"
     database: str = "WCM_DEMO"
@@ -37,6 +60,20 @@ class SnowflakeSettings(_EnvSettings):
     private_key_path: Path | None = None
     password: SecretStr | None = None
     statement_timeout_s: int = Field(default=60, gt=0)
+
+    @model_validator(mode="after")
+    def _connection_or_account(self) -> Self:
+        if self.connection_name is None and not (self.account and self.user):
+            msg = (
+                "set SNOWFLAKE_CONNECTION_NAME (a Snowflake CLI connection) "
+                "or both SNOWFLAKE_ACCOUNT and SNOWFLAKE_USER"
+            )
+            raise ValueError(msg)
+        return self
+
+    def is_set(self, field: str) -> bool:
+        """Whether a value came from the environment or .env rather than a default."""
+        return field in self.model_fields_set
 
 
 class DatabricksSettings(_EnvSettings):
