@@ -54,7 +54,8 @@ ENV PATH="/opt/venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-USER app
+# Numeric, so orchestrators can verify runAsNonRoot without resolving names.
+USER 10001:10001
 WORKDIR /home/app
 EXPOSE 8000
 
