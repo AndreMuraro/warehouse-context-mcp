@@ -1,6 +1,7 @@
 """Snowflake and Databricks adapters against a fake DB-API connection (no credentials)."""
 
 from collections.abc import Sequence
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +16,7 @@ from warehouse_context_mcp.domain import (
 )
 from warehouse_context_mcp.guardrails import MASK
 from warehouse_context_mcp.service import WarehouseContext
+from warehouse_context_mcp.settings import SnowflakeSettings
 from warehouse_context_mcp.warehouses import DatabricksWarehouse, SnowflakeWarehouse
 
 type Routes = list[tuple[str, list[tuple[object, ...]]]]
@@ -167,3 +169,32 @@ def test_curated_catalog_wins_but_cannot_unflag_pii() -> None:
     assert merged.owner == "team"
     assert merged.columns["email"].description == "from comment"
     assert merged.pii_columns == {"email"}
+
+
+def test_snowflake_connect_arguments_pass_the_drivers_own_checks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Feeds our connect() arguments to the driver's argument handling, warnings as errors.
+
+    Connector 5.x warns when the logout behaviour is left implicit; pytest turns that into
+    an error, which is how the live tests first failed.
+    """
+    connector = pytest.importorskip("snowflake.connector")
+    logout = pytest.importorskip("snowflake.connector._internal.logout_config_mapping")
+    captured: dict[str, object] = {}
+
+    def fake_connect(**kwargs: object) -> FakeConnection:
+        captured.update(kwargs)
+        logout.LogoutConfig.from_kwargs(dict(kwargs))
+        return FakeConnection(SNOWFLAKE_ROUTES)
+
+    monkeypatch.setattr(connector, "connect", fake_connect)
+    for key in ("PASSWORD", "PRIVATE_KEY_PATH", "SCHEMA", "DATABASE"):
+        monkeypatch.delenv(f"SNOWFLAKE_{key}", raising=False)
+    env = tmp_path / ".env"
+    env.write_text("SNOWFLAKE_ACCOUNT=org-acct\nSNOWFLAKE_USER=me\n", encoding="utf-8")
+
+    SnowflakeWarehouse.connect(SnowflakeSettings.from_env(env))
+
+    assert captured["authenticator"] == "externalbrowser"
+    assert captured["database"] == "WCM_DEMO"

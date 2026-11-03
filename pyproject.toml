@@ -28,7 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Snowflake publishes no Python 3.15 wheels yet and its source build fails there.
-snowflake = ["snowflake-connector-python>=4; python_version < '3.15'"]
+snowflake = ["snowflake-connector-python>=5.1; python_version < '3.15'"]
 databricks = ["databricks-sql-connector>=4.1"]
 
 [project.scripts]

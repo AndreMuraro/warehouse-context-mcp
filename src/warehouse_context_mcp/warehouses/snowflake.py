@@ -57,6 +57,9 @@ class SnowflakeWarehouse(DbApiWarehouse[Positional]):
                 "STATEMENT_TIMEOUT_IN_SECONDS": settings.statement_timeout_s,
                 "QUERY_TAG": "warehouse-context-mcp",
             },
+            # Explicit, because connector 5.x warns when it is left to default. The server
+            # never runs async queries, so always log the session out on close.
+            enable_server_session_keep_alive_auto_detection=False,
             **auth,
         )
         # The driver types cursor() as SnowflakeCursor | DictCursor; DictCursor is only
