@@ -14,8 +14,10 @@ from importlib.resources import files
 from pathlib import Path
 
 import duckdb
+import yaml
 
 from warehouse_context_mcp import __version__
+from warehouse_context_mcp.domain.catalog import Catalog
 
 DATABASE = "demo.duckdb"
 CATALOG = "catalog.yaml"
@@ -129,6 +131,11 @@ def ensure_demo(directory: Path | None = None) -> tuple[Path, Path]:
         finally:
             Path(partial).unlink(missing_ok=True)
     return database, catalog
+
+
+def bundled_catalog() -> Catalog:
+    """The curated catalog for the demo tables, which the warehouse demo scripts mirror."""
+    return Catalog.model_validate(yaml.safe_load(files(__package__).joinpath(CATALOG).read_text()))
 
 
 def default_demo_dir() -> Path:

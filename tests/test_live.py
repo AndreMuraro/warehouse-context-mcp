@@ -15,6 +15,7 @@ from collections.abc import Generator
 
 import pytest
 
+from warehouse_context_mcp.demo import bundled_catalog
 from warehouse_context_mcp.domain import QueryAccepted, QueryRefused
 from warehouse_context_mcp.guardrails import MASK
 from warehouse_context_mcp.service import WarehouseContext
@@ -73,4 +74,8 @@ def test_aggregate(ctx: WarehouseContext) -> None:
 
 
 def test_freshness_reads_a_timestamp(ctx: WarehouseContext) -> None:
-    assert ctx.freshness("dim_vessels").latest is not None
+    # Which column records updates is curated knowledge, not stored in the warehouse.
+    curated = WarehouseContext(ctx.warehouse, bundled_catalog())
+    result = curated.freshness("dim_vessels")
+    assert result.latest is not None, result.reason
+    assert result.latest.tzinfo is not None

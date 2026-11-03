@@ -65,3 +65,10 @@ def test_demo_files_are_readable_by_other_users(tmp_path: Path) -> None:
     """Built as root in the image, read by an unprivileged user at runtime."""
     for path in ensure_demo(tmp_path):
         assert path.stat().st_mode & stat.S_IROTH, path
+
+
+def test_bundled_catalog_matches_the_file_written_for_clients(tmp_path: Path) -> None:
+    from warehouse_context_mcp.demo import bundled_catalog  # noqa: PLC0415
+
+    _, catalog = ensure_demo(tmp_path)
+    assert bundled_catalog() == Catalog.load(catalog)
