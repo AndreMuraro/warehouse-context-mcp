@@ -16,6 +16,7 @@ from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from . import __version__
 from .domain.models import Freshness, Lineage, QueryResult, TableDescription, TableSummary
 from .service import WarehouseContext
 
@@ -33,7 +34,13 @@ LOCAL_HOSTS = ("127.0.0.1", "localhost", "[::1]")
 
 
 def build_server(ctx: WarehouseContext) -> MCPServer:
-    mcp = MCPServer("warehouse-context", instructions=INSTRUCTIONS)
+    mcp = MCPServer(
+        "warehouse-context",
+        title="Warehouse Context",
+        version=__version__,
+        instructions=INSTRUCTIONS,
+        website_url="https://github.com/AndreMuraro/warehouse-context-mcp",
+    )
 
     @mcp.tool(annotations=READ_ONLY)
     def list_tables() -> list[TableSummary]:

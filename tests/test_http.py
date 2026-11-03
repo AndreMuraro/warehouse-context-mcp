@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from starlette.testclient import TestClient
 
+from warehouse_context_mcp import __version__
 from warehouse_context_mcp.server import build_server, http_app
 from warehouse_context_mcp.service import WarehouseContext
 
@@ -42,7 +43,9 @@ def test_health_endpoint(client: TestClient) -> None:
 def test_initialize_and_call_a_tool_over_http(client: TestClient) -> None:
     init = client.post("/mcp", json=INITIALIZE, headers=MCP_HEADERS)
     assert init.status_code == 200
-    assert init.json()["result"]["serverInfo"]["name"] == "warehouse-context"
+    info = init.json()["result"]["serverInfo"]
+    assert info["name"] == "warehouse-context"
+    assert info["version"] == __version__
 
     call = client.post(
         "/mcp",
