@@ -1,6 +1,7 @@
 """The bundled demo: zero-setup for MCP clients, safe when several start at once."""
 
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -9,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from warehouse_context_mcp import cli
+from warehouse_context_mcp import cli, demo
 from warehouse_context_mcp.demo import ensure_demo
 from warehouse_context_mcp.domain import Catalog
 from warehouse_context_mcp.service import WarehouseContext
@@ -72,3 +73,28 @@ def test_bundled_catalog_matches_the_file_written_for_clients(tmp_path: Path) ->
 
     _, catalog = ensure_demo(tmp_path)
     assert bundled_catalog() == Catalog.load(catalog)
+
+
+def test_losing_a_publish_race_keeps_the_winners_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows refuses to replace a file another process has open (WinError 5)."""
+    real_build = demo.build
+
+    def build_while_another_client_publishes(path: Path) -> None:
+        real_build(path)
+        shutil.copy(path, tmp_path / "demo.duckdb")  # the other client finished first
+
+    original = Path.replace
+
+    def windows_replace(self: Path, target: Path) -> Path:
+        if Path(target).exists():
+            raise PermissionError(5, "Access is denied")
+        return original(self, target)
+
+    monkeypatch.setattr(demo, "build", build_while_another_client_publishes)
+    monkeypatch.setattr(Path, "replace", windows_replace)
+    database, catalog = demo.ensure_demo(tmp_path)
+    assert database.exists()
+    assert catalog.exists()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["catalog.yaml", "demo.duckdb"]

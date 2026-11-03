@@ -115,7 +115,7 @@ def ensure_demo(directory: Path | None = None) -> tuple[Path, Path]:
         Path(partial).unlink()  # DuckDB wants to create the file itself
         try:
             build(Path(partial))
-            Path(partial).replace(database)
+            _publish(Path(partial), database)
         finally:
             Path(partial).unlink(missing_ok=True)
     catalog = target / CATALOG
@@ -127,10 +127,23 @@ def ensure_demo(directory: Path | None = None) -> tuple[Path, Path]:
             # mkstemp creates owner-only files; the catalog is not secret, and in the image it
             # is built as root but read by an unprivileged user.
             Path(partial).chmod(0o644)
-            Path(partial).replace(catalog)
+            _publish(Path(partial), catalog)
         finally:
             Path(partial).unlink(missing_ok=True)
     return database, catalog
+
+
+def _publish(partial: Path, target: Path) -> None:
+    """Rename a finished file into place, unless another process already published it.
+
+    On Windows a file that another process has open cannot be replaced, so when two
+    clients start at once the second rename fails; its copy is identical and is dropped.
+    """
+    try:
+        partial.replace(target)
+    except PermissionError:
+        if not target.exists():
+            raise
 
 
 def bundled_catalog() -> Catalog:

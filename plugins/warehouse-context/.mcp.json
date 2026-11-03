@@ -3,7 +3,7 @@
     "warehouse": {
       "command": "uvx",
       "args": [
-        "warehouse-context-mcp==0.4.0",
+        "warehouse-context-mcp==0.4.1",
         "--demo"
       ]
     }

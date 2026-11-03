@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.1] - 2026-11-03
+
+### Fixed
+- `--demo` on Windows: when two clients started at the same time, the second could fail
+  with "Access is denied" because Windows cannot replace a file another process has open.
+  The second client now uses the file the first one published.
+
+### Changed
+- The server reports its package version, a title and its website to MCP clients.
+
 ## [0.4.0] - 2026-11-03
 
 First public release.
