@@ -3,31 +3,60 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
 
-permissions:
-  contents: read
+# No job gets more than it needs; nothing here can publish.
+permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  ZIZMOR_VERSION: "1.32.0"
+  PIP_AUDIT_VERSION: "2.10.1"
+
 jobs:
   lint:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
           enable-cache: true
       - run: uv sync --locked --all-extras
       - run: uv run ruff format --check
       - run: uv run ruff check --output-format github
       - run: uv run ty check --output-format github
+      - name: Workflow security (zizmor)
+        run: uvx "zizmor==${ZIZMOR_VERSION}" --offline --format github .github/workflows/
+      - name: Dockerfile lint (hadolint)
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387  # v3.5.0
+        with:
+          dockerfile: Dockerfile
+
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+      - name: Known vulnerabilities in locked dependencies (pip-audit)
+        run: |
+          uv export --frozen --all-extras --no-emit-project --format requirements-txt > requirements.txt
+          uvx "pip-audit==${PIP_AUDIT_VERSION}" --requirement requirements.txt --disable-pip --strict
 
   test:
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -37,8 +66,10 @@ jobs:
           - os: windows-latest
             python: "3.14"
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
           enable-cache: true
           python-version: ${{ matrix.python }}
@@ -48,25 +79,41 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
       - run: uv build
       - run: uvx --from dist/*.whl warehouse-context-mcp --version
 
   container:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
       - name: Build image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: .
           load: true
           tags: warehouse-context-mcp:local
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Image vulnerabilities with a fix available (grype)
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
+        with:
+          image: warehouse-context-mcp:local
+          only-fixed: true
+          severity-cutoff: high
+          fail-build: true
+          output-format: table
       - name: stdio transport answers initialize
         run: |
           printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
@@ -97,86 +144,3 @@ jobs:
         run: docker compose logs
       - if: always()
         run: docker compose down
-
-  # --- releases: only for version tags --------------------------------------------------------
-
-  pypi:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [lint, test, build, container]
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/warehouse-context-mcp
-    permissions:
-      contents: read
-      id-token: write  # PyPI trusted publishing: no stored token
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-      - name: Tag matches the package version
-        run: test "${GITHUB_REF_NAME#v}" = "$(uv version --short)"
-      - run: uv build
-      - run: uv publish --trusted-publishing always
-
-  image:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [lint, test, container]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/andremuraro/warehouse-context-mcp  # image names must be lower-case
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-
-  mcp-registry:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [pypi]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write  # grants the io.github.AndreMuraro/* namespace
-    env:
-      MCP_PUBLISHER_VERSION: v1.8.7
-    steps:
-      - uses: actions/checkout@v7
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
-      - name: Download and verify mcp-publisher
-        run: |
-          set -euo pipefail
-          archive="mcp-publisher_linux_amd64.tar.gz"
-          base="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
-          curl -fsSL -o "$archive" "$base/$archive"
-          curl -fsSL -o "$archive.sigstore.json" "$base/$archive.sigstore.json"
-          cosign verify-blob --bundle "$archive.sigstore.json" \
-            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
-            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-            "$archive"
-          tar xzf "$archive" mcp-publisher
-      - run: ./mcp-publisher login github-oidc
-      - name: Publish (retries while PyPI propagates the new release)
-        run: |
-          for attempt in 1 2 3 4 5; do
-            ./mcp-publisher publish && exit 0
-            sleep 30
-          done
-          exit 1

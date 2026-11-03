@@ -65,6 +65,16 @@ To add it everywhere instead:
 | Codex | `codex mcp add warehouse -- uvx warehouse-context-mcp --demo` |
 | Any client, over HTTP | `docker compose up`, then point it at `http://127.0.0.1:8000/mcp` |
 
+#### Claude Code plugin and agent skill
+
+The repository is also a Claude Code plugin marketplace. The plugin bundles the server and a `warehouse-context` skill that teaches the agent the workflow (find, describe, check freshness, query, cite the executed SQL) and how to respond to refusals:
+
+```bash
+/plugin install warehouse-context --marketplace AndreMuraro/warehouse-context-mcp
+```
+
+The same skill is checked in for project use: `.claude/skills/` (Claude Code), `.agents/skills/` (Codex) and both are read by VS Code. Or copy `plugins/warehouse-context/skills/warehouse-context/` into your personal skills folder.
+
 Replace `--demo` with `--backend snowflake` or `--backend databricks` (and the settings below) for a real warehouse.
 
 Then ask: *"Which vessel class had the best average TCE last quarter, and is that table fresh?"*

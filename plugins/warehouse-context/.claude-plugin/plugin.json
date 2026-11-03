@@ -1,0 +1,10 @@
+{
+  "name": "warehouse-context",
+  "description": "Governed, read-only warehouse context for Claude: the MCP server (bundled demo warehouse) plus a skill for using it well.",
+  "version": "0.4.0",
+  "author": { "name": "André Muraro" },
+  "homepage": "https://github.com/AndreMuraro/warehouse-context-mcp",
+  "repository": "https://github.com/AndreMuraro/warehouse-context-mcp",
+  "license": "MIT",
+  "keywords": ["mcp", "data-warehouse", "sql", "snowflake", "databricks", "duckdb"]
+}

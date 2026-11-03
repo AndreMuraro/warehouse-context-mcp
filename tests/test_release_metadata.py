@@ -41,3 +41,21 @@ def test_client_configs_launch_the_demo() -> None:
     ):
         assert server["command"] == "uv"
         assert server["args"][-2:] == ["warehouse-context-mcp", "--demo"]
+
+
+PLUGIN = ROOT / "plugins" / "warehouse-context"
+
+
+def test_skill_copies_match_the_plugin_skill() -> None:
+    canonical = (PLUGIN / "skills" / "warehouse-context" / "SKILL.md").read_text(encoding="utf-8")
+    for folder in (".claude", ".agents"):
+        copy = ROOT / folder / "skills" / "warehouse-context" / "SKILL.md"
+        assert copy.read_text(encoding="utf-8") == canonical, f"{copy} is out of date"
+
+
+def test_plugin_pins_the_released_server() -> None:
+    manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    assert manifest["version"] == PROJECT["version"]
+    server = json.loads((PLUGIN / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
+    pinned = f"git+https://github.com/AndreMuraro/warehouse-context-mcp@v{PROJECT['version']}"
+    assert pinned in server["warehouse"]["args"]

@@ -1,0 +1,12 @@
+{
+  "name": "warehouse-context-mcp",
+  "description": "Governed warehouse context for AI agents",
+  "owner": { "name": "André Muraro" },
+  "plugins": [
+    {
+      "name": "warehouse-context",
+      "source": "./plugins/warehouse-context",
+      "description": "MCP server for governed, read-only warehouse context, plus a skill for answering data questions with it"
+    }
+  ]
+}
