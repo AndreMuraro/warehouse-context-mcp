@@ -9,8 +9,10 @@ from pathlib import Path
 import uvicorn
 
 from . import __version__
+from .audit import AuditLog
 from .demo import ensure_demo
 from .domain.catalog import Catalog
+from .domain.dbt import load_manifest
 from .domain.errors import ConfigurationError
 from .server import build_server, http_app
 from .service import Limits, WarehouseContext
@@ -41,6 +43,17 @@ def _parser() -> argparse.ArgumentParser:
         help="serve the bundled synthetic warehouse, built on first use (no setup needed)",
     )
     parser.add_argument("--catalog", type=Path, help="curated catalog YAML file")
+    parser.add_argument(
+        "--dbt-manifest",
+        type=Path,
+        help="dbt manifest.json: table docs, owners, lineage, freshness and PII tags "
+        "(the --catalog file wins where both set a value)",
+    )
+    parser.add_argument(
+        "--audit-log",
+        type=Path,
+        help="append one JSON line per tool call to this file (never rows of data)",
+    )
     parser.add_argument("--max-rows", type=int, default=200, help="hard cap on rows returned")
     parser.add_argument(
         "--env-file", type=Path, default=Path(".env"), help="optional KEY=VALUE settings file"
@@ -79,11 +92,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ConfigurationError as err:
         print(f"warehouse-context-mcp: {err}", file=sys.stderr)  # noqa: T201
         return 2
+    audit = AuditLog(args.audit_log) if args.audit_log else None
     try:
-        ctx = WarehouseContext(
-            warehouse, Catalog.load(args.catalog), Limits(max_rows=args.max_rows)
-        )
-        server = build_server(ctx)
+        curated = Catalog.load(args.catalog)
+        if args.dbt_manifest:
+            curated = load_manifest(args.dbt_manifest).merged_with(curated)
+        ctx = WarehouseContext(warehouse, curated, Limits(max_rows=args.max_rows))
+        server = build_server(ctx, audit)
         match args.transport:
             case Transport.STDIO:
                 server.run()
@@ -92,4 +107,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     finally:
         warehouse.close()
+        if audit:
+            audit.close()
     return 0

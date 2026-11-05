@@ -56,6 +56,12 @@ planted `.env` file, and the supply chain (dependencies, Actions, images).
    releases built from clean checkouts with provenance, an SBOM and PyPI attestations;
    images scanned.
 
+10. **Audit.** With `--audit-log`, every tool call is appended to a JSON-lines file
+    created owner-only: arguments, outcome, duration, row count and the executed SQL,
+    never result rows. The agent's SQL can contain literals it typed, so treat the file
+    as sensitive; it cannot be rewritten through the server, but anyone with file access
+    can, so ship it to append-only storage when it must be tamper-evident.
+
 ## Residual risks and what to do about them
 
 - **Parser and engine disagreement.** The policy reasons about sqlglot's parse. A query

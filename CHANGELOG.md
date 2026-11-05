@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.0] - Unreleased
+
+### Added
+- Evaluation harness in `evals/`: 20 analyst questions over the demo warehouse, answered
+  under three arms (raw SQL, raw SQL with the catalog in the prompt, this server) and
+  scored for accuracy, wrong-table picks and PII exposures. Works with any Anthropic- or
+  OpenAI-compatible API: presets for Anthropic, OpenAI, OpenRouter, Moonshot (Kimi), Groq,
+  Together, Mistral, DeepSeek, Gemini and Ollama, or `--base-url`. Cached, resumable runs;
+  `--dry-run` needs no key. See ADR 0005.
+- `--dbt-manifest`: table and column docs, owners, grain, lineage, freshness and PII tags
+  from a dbt `manifest.json`, layered between warehouse comments and the curated YAML.
+- `--audit-log`: an append-only JSON-lines record of every tool call (arguments, outcome,
+  duration, row count, executed SQL; never result rows), created owner-only.
+- Demo warehouse: two decoy tables, `legacy_voyage_pnl` (deprecated) and
+  `raw_fixture_messages` (one row per amendment), documented in the catalog. Existing
+  demo tables keep every value.
+
+### Changed
+- `stg_voyages` now lists `raw_fixture_messages` upstream in the demo catalog.
+
 ## [0.4.1] - 2026-11-03
 
 ### Fixed

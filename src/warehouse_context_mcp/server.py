@@ -17,6 +17,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from . import __version__
+from .audit import Audit, NoAudit
 from .domain.models import Freshness, Lineage, QueryResult, TableDescription, TableSummary
 from .service import WarehouseContext
 
@@ -33,7 +34,9 @@ type TableName = Annotated[str, Field(min_length=1, max_length=255, description=
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "[::1]")
 
 
-def build_server(ctx: WarehouseContext) -> MCPServer:
+def build_server(ctx: WarehouseContext, audit: Audit | None = None) -> MCPServer:
+    """Expose ``ctx`` as MCP tools; each call is recorded in ``audit`` when one is given."""
+    log = audit or NoAudit()
     mcp = MCPServer(
         "warehouse-context",
         title="Warehouse Context",
@@ -45,7 +48,7 @@ def build_server(ctx: WarehouseContext) -> MCPServer:
     @mcp.tool(annotations=READ_ONLY)
     def list_tables() -> list[TableSummary]:
         """List warehouse tables with their documented purpose and owner."""
-        return ctx.list_tables()
+        return log.call("list_tables", {}, ctx.list_tables)
 
     @mcp.tool(annotations=READ_ONLY)
     def describe_table(table: TableName) -> TableDescription:
@@ -53,22 +56,26 @@ def build_server(ctx: WarehouseContext) -> MCPServer:
 
         Call this before writing SQL against a table.
         """
-        return ctx.describe_table(table)
+        return log.call("describe_table", {"table": table}, lambda: ctx.describe_table(table))
 
     @mcp.tool(annotations=READ_ONLY)
     def table_lineage(table: TableName, depth: Annotated[int, Field(ge=1, le=5)] = 3) -> Lineage:
         """Upstream sources and downstream consumers of a table, from the curated catalog."""
-        return ctx.lineage(table, depth=depth)
+        return log.call(
+            "table_lineage",
+            {"table": table, "depth": depth},
+            lambda: ctx.lineage(table, depth=depth),
+        )
 
     @mcp.tool(annotations=READ_ONLY)
     def table_freshness(table: TableName) -> Freshness:
         """When the table was last updated and whether that meets its documented expectation."""
-        return ctx.freshness(table)
+        return log.call("table_freshness", {"table": table}, lambda: ctx.freshness(table))
 
     @mcp.tool(annotations=READ_ONLY)
     def sample_rows(table: TableName, n: Annotated[int, Field(ge=1, le=20)] = 5) -> QueryResult:
         """A few example rows, with PII columns masked."""
-        return ctx.sample_rows(table, n)
+        return log.call("sample_rows", {"table": table, "n": n}, lambda: ctx.sample_rows(table, n))
 
     @mcp.tool(annotations=READ_ONLY)
     def run_query(
@@ -80,7 +87,11 @@ def build_server(ctx: WarehouseContext) -> MCPServer:
         Writes, DDL and multiple statements are refused, a row limit is always applied,
         and PII columns can only be counted, never read.
         """
-        return ctx.query(sql, max_rows=max_rows)
+        return log.call(
+            "run_query",
+            {"sql": sql, "max_rows": max_rows},
+            lambda: ctx.query(sql, max_rows=max_rows),
+        )
 
     @mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)
     async def healthz(_: Request) -> Response:

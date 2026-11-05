@@ -1,6 +1,7 @@
 """Domain model: the curated catalog, result types and errors. No I/O beyond YAML loading."""
 
 from .catalog import Catalog, ColumnDoc, TableDoc
+from .dbt import catalog_from_manifest, load_manifest
 from .errors import ConfigurationError, QueryRejectedError, UnknownTableError, WarehouseContextError
 from .models import (
     Cell,
@@ -37,4 +38,6 @@ __all__ = [
     "TableSummary",
     "UnknownTableError",
     "WarehouseContextError",
+    "catalog_from_manifest",
+    "load_manifest",
 ]

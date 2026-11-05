@@ -31,7 +31,7 @@ tables:
     description: Voyages as received from the fixtures system, lightly cleaned.
     owner: fleet-data
     grain: voyage_id
-    upstream: [dim_vessels, dim_charterers]
+    upstream: [raw_fixture_messages, dim_vessels, dim_charterers]
     freshness_column: loaded_at
     expected_freshness_hours: 12
     columns:
@@ -53,3 +53,34 @@ tables:
       voyage_costs_usd: { description: "Bunkers, port costs and canal dues in USD." }
       duration_days: { description: "Days from load port arrival to discharge completion." }
       tce_usd_per_day: { description: "Time-charter equivalent in USD per day." }
+
+  raw_fixture_messages:
+    description: >
+      Raw messages from the fixtures system, one row per message. A voyage is sent again
+      each time it is amended, so it can appear several times and only its latest message
+      is current. Use stg_voyages for analysis.
+    owner: fleet-data
+    grain: message_id
+    freshness_column: received_at
+    expected_freshness_hours: 12
+    columns:
+      message_id: { description: "Message sequence number." }
+      voyage_id: { description: "Fixture identifier; repeats across amendments." }
+      cargo_tonnes: { description: "Cargo quantity as of this message, not necessarily current." }
+      received_at: { description: "When the message arrived." }
+
+  legacy_voyage_pnl:
+    description: >
+      DEPRECATED, do not use: the voyage P&L from the previous economics model, frozen
+      when fct_voyage_economics replaced it. It covers older voyages only, its revenue is
+      net of a 5% address commission and its duration includes ballast days, so its
+      figures differ from the current definitions.
+    owner: freight-analytics
+    grain: voyage_id
+    freshness_column: computed_at
+    expected_freshness_hours: 12
+    columns:
+      revenue_usd: { description: "Revenue net of address commission (old definition)." }
+      costs_usd: { description: "Voyage costs in USD." }
+      duration_days: { description: "Laden plus ballast days (old definition)." }
+      tce_usd_per_day: { description: "TCE under the old definitions." }

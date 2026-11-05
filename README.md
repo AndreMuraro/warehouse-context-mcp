@@ -189,20 +189,81 @@ tables:
       tce_usd_per_day: { description: TCE in USD per day. }
 ```
 
-In production it would be generated from dbt docs, Unity Catalog comments or a data catalog.
+### From dbt
+
+`--dbt-manifest target/manifest.json` reads the docs a dbt project already has: model, seed, snapshot and source descriptions, column descriptions, `owner` and `grain` from `meta`, lineage from `depends_on`, source freshness from `loaded_at_field` and `warn_after`, and PII from a column's `meta` (`pii: true` or `contains_pii: true`) or a `pii` tag. Tables are matched by relation name (`alias` or `identifier`).
+
+The layers stack: warehouse comments and tags, then dbt, then the curated YAML on top, which wins where it sets a value. A PII flag from any layer sticks.
+
+```bash
+uvx warehouse-context-mcp --backend snowflake --dbt-manifest target/manifest.json --catalog overrides.yaml
+```
+
+## Audit log
+
+`--audit-log audit.jsonl` appends one JSON line per tool call: time, tool, arguments, outcome (`ok`, `refused` or `error`), duration, row count and, for queries, the SQL actually sent after the policy rewrote it. Result rows are never written, so the log holds no warehouse data beyond what the agent put in its own SQL. The file is created owner-only, opened append-only and never truncated; rotation and shipping are left to the platform.
+
+```json
+{"ts": "2026-11-05T12:00:00.000+00:00", "tool": "run_query", "arguments": {"sql": "select contact_email from dim_charterers", "max_rows": 100}, "outcome": "ok", "rows": 12, "truncated": false, "sql": "SELECT '***' AS \"contact_email\" FROM \"main\".\"dim_charterers\" AS \"dim_charterers\" LIMIT 100", "duration_ms": 3.1}
+```
+
+## Evaluation
+
+The claim behind this server is that agents answer warehouse questions better with governed context than with raw SQL access. [`evals/`](evals) measures it.
+
+**Setup.** The demo warehouse plus two decoys an analyst learns to avoid: `legacy_voyage_pnl`, a deprecated table frozen months ago with older definitions, and `raw_fixture_messages`, the raw feed where a voyage appears once per amendment. [20 analyst questions](evals/questions.yaml) cover counts, sums, rankings, definitions, freshness and a request for a contact's email. Each reference answer is computed from the data at run time.
+
+The same model, prompt and 20-turn budget run under three arms:
+
+| Arm | The agent gets |
+|---|---|
+| `sql` | One raw SQL tool on a read-only connection: the usual text-to-SQL setup |
+| `sql+docs` | The same tool, with the curated catalog pasted into the system prompt |
+| `mcp` | This server's six tools, called through the MCP server in-process |
+
+`sql+docs` separates what documentation alone buys from what the tools and guardrails add.
+
+**Scoring** is deterministic. A number must be within the question's tolerance (0.1% by default) of the reference, a name must appear in the answer, and the email question is correct when no PII value is disclosed. A **wrong-table pick** is an answer whose last query read a decoy. A **PII exposure** is any PII value reaching the model, in a tool result or the answer.
+
+**Run it.** Any provider with an Anthropic- or OpenAI-compatible API works. The key is read from the environment or a `.env` file and never printed.
+
+```bash
+uv run python -m evals --list-providers
+uv run python -m evals --provider anthropic --model <model-id> --repeats 3
+uv run python -m evals --provider openrouter --model <vendor/model> --repeats 3
+uv run python -m evals --provider kimi --model <model-id>
+uv run python -m evals --provider ollama --model <local-model>          # no key, local
+uv run python -m evals --provider custom --base-url http://localhost:4000/v1 --model <id>  # LiteLLM, vLLM
+uv run python -m evals --dry-run                                         # scripted, no key
+```
+
+Each run writes a folder under `evals/results/` with its own freshly built database, the reference answers, cached model responses, per-question records, full transcripts and `results.md`. `--resume <folder>` continues an interrupted run without paying for finished calls. `--questions q01,q08` and `--arms sql,mcp` narrow a run, and `--temperature none` suits models that reject the parameter.
+
+### Results
+
+_First model runs go here before the v0.5.0 tag._
+
+### Limits
+
+- The warehouse is small, synthetic and has one schema, and the decoys were designed by the same person who wrote the server. The question file is public so the traps can be judged.
+- `sql+docs` pastes the whole catalog into the prompt. That works for six tables; for a real warehouse it would not fit, which is part of the argument for tools.
+- The `mcp` arm calls the server in-process. The tool schemas and result text are the ones a client receives, but stdio and HTTP transport are not exercised here (CI covers them).
+- Models vary between runs even at temperature 0. Use `--repeats 3` and read the range.
 
 ## Architecture
 
 ```
 src/warehouse_context_mcp/
 ├── demo/          the bundled synthetic warehouse and its catalog
-├── domain/        catalog, result models, namespace, errors (no I/O beyond YAML)
+├── domain/        catalog, dbt manifest import, result models, namespace, errors
 ├── guardrails/    QueryPolicy: parse, scope, PII rules, row limit; result masking
 ├── warehouses/    Warehouse protocol + DuckDB, Snowflake, Databricks adapters
 ├── service.py     WarehouseContext: combines the three; no MCP dependency
 ├── server.py      MCP transport: six read-only tools, stdio or Streamable HTTP
+├── audit.py       append-only JSON-lines log of tool calls
 ├── settings.py    pydantic-settings for connection config and secrets
 └── cli.py         entry point
+evals/             the evaluation harness (not shipped in the package)
 ```
 
 Dependencies point inwards: the transport knows the service, the service knows the domain, guardrails and the `Warehouse` protocol, and nothing in the domain knows about MCP or any driver.
@@ -230,9 +291,8 @@ CI runs the same on Python 3.14 and 3.15 (Linux) and 3.14 (Windows), and builds 
 - [x] v0.2: Snowflake and Databricks Unity Catalog adapters, native comments and PII tags, schema scoping
 - [x] v0.3: Python 3.14+, uv, ruff and ty; layered package; typed tool inputs and outputs; table names qualified by the policy
 - [x] v0.4: Streamable HTTP transport, hardened container image and Compose setup, Snowflake CLI connections, zero-setup `--demo`, client configs, PyPI and MCP Registry release pipeline
-- [ ] Catalog import from dbt `manifest.json`
-- [ ] Evaluation: 20 analyst questions answered with and without the server, scored for correctness and table choice
-- [ ] Per-tool audit log
+- [x] v0.5: evaluation (20 analyst questions, three arms, any Anthropic- or OpenAI-compatible model), dbt `manifest.json` import, append-only audit log
+- [ ] Fewer false refusals: `ORDER BY` on an output that is the same column it shadows (found by the evaluation)
 
 ## License
 

@@ -1,6 +1,6 @@
 [project]
 name = "warehouse-context-mcp"
-version = "0.4.1"
+version = "0.5.0"
 description = "An MCP server that gives AI agents trustworthy, governed context about a data warehouse: docs, lineage, freshness, and read-only queries with guardrails."
 readme = "README.md"
 license = "MIT"
@@ -60,7 +60,7 @@ default-groups = ["dev"]
 [tool.ruff]
 line-length = 100
 target-version = "py314"
-src = ["src", "tests"]
+src = ["src", "tests", "evals"]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -81,6 +81,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "PLR2004", "SLF001", "INP001", "D"]
 "scripts/**" = ["INP001", "T201", "D"]
+"evals/__main__.py" = ["T201"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -97,7 +98,7 @@ docstring-code-format = true
 python-version = "3.14"
 
 [tool.ty.src]
-include = ["src", "tests", "scripts"]
+include = ["src", "tests", "scripts", "evals"]
 
 [tool.ty.rules]
 # Fail on anything ty is unsure about, not only definite errors.
@@ -120,6 +121,7 @@ rules = { unresolved-import = "ignore" }
 minversion = "9.0"
 testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config", "-ra"]
+pythonpath = ["."]  # the evals package lives at the repository root
 markers = ["live: needs real warehouse credentials in the environment"]
 filterwarnings = ["error"]
 

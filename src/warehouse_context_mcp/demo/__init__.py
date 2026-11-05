@@ -9,7 +9,8 @@ import os
 import random
 import shutil
 import tempfile
-from datetime import UTC, datetime, timedelta
+from collections.abc import Sequence
+from datetime import UTC, date, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 
@@ -24,6 +25,8 @@ CATALOG = "catalog.yaml"
 
 PORTS = ["Rotterdam", "Singapore", "Houston", "Santos", "Fujairah", "Ningbo", "Antwerp", "Durban"]
 CLASSES = ["VLCC", "Suezmax", "Aframax", "LR2", "MR"]
+
+type Voyage = tuple[int, int, int, str, str, date, int, datetime]
 
 
 def build(path: Path, now: datetime | None = None) -> None:
@@ -68,7 +71,7 @@ def build(path: Path, now: datetime | None = None) -> None:
     con.execute("""create table stg_voyages (
         voyage_id integer, vessel_id integer, charterer_id integer, load_port varchar,
         discharge_port varchar, laycan_start date, cargo_tonnes integer, loaded_at timestamp)""")
-    voyages = []
+    voyages: list[Voyage] = []
     for v in range(1, 501):
         load, dis = rng.sample(PORTS, 2)
         start = (now - timedelta(days=rng.randint(1, 365))).date()
@@ -96,7 +99,51 @@ def build(path: Path, now: datetime | None = None) -> None:
     con.execute("""alter table fct_voyage_economics add column tce_usd_per_day double""")
     con.execute("""update fct_voyage_economics
         set tce_usd_per_day = round((revenue_usd - voyage_costs_usd) / duration_days, 2)""")
+    _add_decoys(con, voyages, now)
     con.close()
+
+
+def _add_decoys(con: duckdb.DuckDBPyConnection, voyages: Sequence[Voyage], now: datetime) -> None:
+    """Tables a careful analyst avoids; the catalog says why, the schema does not.
+
+    They give the evaluation (``evals/``) something to get wrong: a deprecated table with
+    older definitions and a raw feed where a voyage appears once per amendment. Their own
+    seed keeps every value in the tables above unchanged.
+    """
+    rng = random.Random(7)  # noqa: S311  reproducible synthetic data, not security
+    for t in ["legacy_voyage_pnl", "raw_fixture_messages"]:
+        con.execute(f"drop table if exists {t}")
+
+    # Frozen when the economics model was replaced: older voyages only, revenue net of a
+    # 5% address commission, and ballast days counted in the duration.
+    con.execute(
+        """create table legacy_voyage_pnl as
+        select voyage_id, vessel_id,
+               round(revenue_usd * 0.95, 2) as revenue_usd,
+               voyage_costs_usd as costs_usd,
+               duration_days + 6 as duration_days,
+               round((revenue_usd * 0.95 - voyage_costs_usd) / (duration_days + 6), 2)
+                   as tce_usd_per_day,
+               ?::timestamp as computed_at
+        from fct_voyage_economics
+        where voyage_id <= 350""",
+        [now - timedelta(days=140)],
+    )
+
+    con.execute("""create table raw_fixture_messages (
+        message_id integer, voyage_id integer, vessel_id integer, charterer_id integer,
+        cargo_tonnes integer, received_at timestamp)""")
+    messages: list[tuple[object, ...]] = []
+    for voyage_id, vessel_id, charterer_id, *_, cargo, loaded_at in voyages:
+        amendments = rng.choice([0, 0, 1, 1, 2])
+        # Earlier messages carry the quantities later amended; the last one is current.
+        for k in range(amendments, -1, -1):
+            tonnes = cargo if k == 0 else cargo + rng.choice([-1, 1]) * rng.randint(1, 20) * 1_000
+            received = loaded_at - timedelta(hours=6 * k + 1)
+            messages.append(
+                (len(messages) + 1, voyage_id, vessel_id, charterer_id, tonnes, received)
+            )
+    con.executemany("insert into raw_fixture_messages values (?, ?, ?, ?, ?, ?)", messages)
 
 
 def ensure_demo(directory: Path | None = None) -> tuple[Path, Path]:
