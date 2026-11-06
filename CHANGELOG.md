@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.5.1] - Unreleased
+## [0.5.1] - 2026-11-06
 
 ### Fixed
 - `ORDER BY` on an output that is the same column as its name is no longer refused:
