@@ -430,3 +430,127 @@ def test_list_providers(capsys: pytest.CaptureFixture[str]) -> None:
     assert "moonshot" in out
     assert "(alias: kimi)" in out
     assert "custom" in out
+
+
+# --- v0.5 follow-ups: metric, parallel runs, rescoring ------------------------------------
+
+
+def test_metadata_lookups_and_string_literals_do_not_count_as_reads() -> None:
+    decoys = SUITE.decoys
+    lookup = (
+        "select column_name from information_schema.columns where table_name = 'legacy_voyage_pnl'"
+    )
+    assert tables_in(lookup, decoys) == set()
+    assert tables_in("select * from main.raw_fixture_messages", decoys) == {"raw_fixture_messages"}
+    assert tables_in("with x as (select 1) select * from x", decoys) == set()
+
+
+def test_checking_a_decoy_after_a_correct_answer_is_not_a_wrong_pick(demo_db: Path) -> None:
+    question = next(q for q in SUITE.questions if q.id == "q13")
+    script = Script(
+        call("run_sql", sql="select avg(duration_days) from fct_voyage_economics"),
+        call("run_sql", sql="select avg(duration_days) from legacy_voyage_pnl"),  # cross-check
+        call("submit_answer", answer="32"),
+    )
+    arm = RawSqlArm(demo_db, docs=None)
+    try:
+        record = run_question(script, arm, question, 32.0, pii=PII, decoys=SUITE.decoys)
+    finally:
+        arm.close()
+    assert (record.correct, record.wrong_table, record.decoys_read) == (
+        True,
+        False,
+        ["legacy_voyage_pnl"],
+    )
+
+
+def test_a_failed_query_on_a_decoy_is_not_a_read(demo_db: Path) -> None:
+    question = SUITE.questions[0]
+    script = Script(
+        call("run_sql", sql="select nope from raw_fixture_messages"),
+        call("submit_answer", answer="1"),
+    )
+    arm = RawSqlArm(demo_db, docs=None)
+    try:
+        record = run_question(script, arm, question, 500.0, pii=PII, decoys=SUITE.decoys)
+    finally:
+        arm.close()
+    assert (record.correct, record.decoys_read, record.wrong_table) == (False, [], False)
+
+
+def test_running_out_of_turns_is_an_error_not_a_wrong_pick(demo_db: Path) -> None:
+    question = SUITE.questions[0]
+    script = Script(*[call("run_sql", sql="select count(*) from raw_fixture_messages")] * 2)
+    arm = RawSqlArm(demo_db, docs=None)
+    try:
+        record = run_question(
+            script, arm, question, 500.0, pii=PII, decoys=SUITE.decoys, max_turns=2
+        )
+    finally:
+        arm.close()
+    assert record.error
+    assert record.decoys_read == ["raw_fixture_messages"]
+    assert not record.wrong_table
+
+
+def _records(run: Path) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in (run / "records.jsonl").read_text().splitlines()]
+
+
+def test_parallel_run_matches_sequential(tmp_path: Path) -> None:
+    sequential, parallel = tmp_path / "seq", tmp_path / "par"
+    assert cli.main(["--dry-run", "--jobs", "1", "--out", str(sequential)]) == 0
+    assert cli.main(["--dry-run", "--jobs", "8", "--out", str(parallel)]) == 0
+
+    def verdicts(run: Path) -> set[tuple[str, str, bool]]:
+        return {(r["question_id"], r["arm"], r["correct"]) for r in _records(run)}
+
+    assert verdicts(sequential) == verdicts(parallel)
+    lines = (parallel / "transcripts.jsonl").read_text().splitlines()
+    assert len(lines) == 60
+    assert all(json.loads(line)["transcript"] for line in lines)  # no torn lines
+
+
+def test_narrow_runs_add_up_in_one_folder(tmp_path: Path) -> None:
+    run = tmp_path / "run"
+    assert cli.main(["--dry-run", "--out", str(run), "--questions", "q01", "--arms", "sql"]) == 0
+    assert cli.main(["--dry-run", "--resume", str(run), "--questions", "q02,q08"]) == 0
+    keys = {(r["question_id"], r["arm"]) for r in _records(run)}
+    assert keys == {("q01", "sql")} | {(q, a) for q in ("q02", "q08") for a in cli.ArmName}
+    assert "q01: How many voyages" in (run / "results.md").read_text(encoding="utf-8")
+
+    # --redo asks again and replaces, it does not duplicate.
+    assert cli.main(["--dry-run", "--resume", str(run), "--questions", "q01", "--redo"]) == 0
+    records = cli._load_records(run / "records.jsonl")
+    assert sum(r.question_id == "q01" for r in records) == 3  # one per arm
+
+
+def test_rescore_recomputes_from_transcripts(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = tmp_path / "run"
+    assert cli.main(["--dry-run", "--out", str(run), "--questions", "q01,q08"]) == 0
+    tampered = []
+    for r in _records(run):
+        r |= {"correct": False, "wrong_table": True, "decoys_read": ["x"]}
+        tampered.append(json.dumps(r))
+    (run / "records.jsonl").write_text("\n".join(tampered) + "\n", encoding="utf-8")
+    capsys.readouterr()
+
+    assert cli.main(["--rescore", str(run)]) == 0
+    records = _records(run)
+    assert all(r["correct"] and not r["wrong_table"] and r["decoys_read"] == [] for r in records)
+    assert "Read a decoy" in capsys.readouterr().out
+
+
+def test_redo_needs_resume_and_rescore_needs_a_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for argv, message in [
+        (["--dry-run", "--redo"], "--redo needs --resume"),
+        (["--rescore", str(tmp_path)], "is not an evaluation run folder"),
+        (["--dry-run", "--jobs", "0"], "--jobs must be at least 1"),
+    ]:
+        with pytest.raises(SystemExit):
+            cli.main(argv)
+        assert message in capsys.readouterr().err

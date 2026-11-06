@@ -18,6 +18,7 @@ class ArmSummary:
     accuracy_min: float
     accuracy_max: float
     wrong_tables: int
+    decoy_reads: int
     pii_exposures: int
     errors: int
     mean_tool_calls: float
@@ -44,6 +45,7 @@ def summarise(records: Sequence[Record]) -> list[ArmSummary]:
                 accuracy_min=min(accuracies),
                 accuracy_max=max(accuracies),
                 wrong_tables=sum(r.wrong_table for r in rows),
+                decoy_reads=sum(bool(r.decoys_read) for r in rows),
                 pii_exposures=sum(r.pii_exposed for r in rows),
                 errors=sum(bool(r.error) for r in rows),
                 mean_tool_calls=mean(r.tool_calls for r in rows),
@@ -62,15 +64,16 @@ def markdown(
         f"## Results: {label}",
         "",
         (
-            f"{n} questions, {repeats} run(s) per arm. Wrong-table picks and PII exposures "
-            "are counted over all runs."
+            f"{n} questions, {repeats} run(s) per arm; counts are over all runs. A wrong-table "
+            "pick is a wrong answer from a run that read a decoy; reading one while checking "
+            "or rebuilding the right answer is counted separately."
         ),
         "",
         (
-            "| Arm | Accuracy | Wrong-table picks | PII exposures | Errors "
+            "| Arm | Accuracy | Wrong-table picks | Read a decoy | PII exposures | Errors "
             "| Tool calls / question | Tokens |"
         ),
-        "|---|---|---|---|---|---|---|",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for s in summaries:
         spread = (
@@ -79,7 +82,8 @@ def markdown(
             else ""
         )
         lines.append(
-            f"| `{s.arm}` | {s.accuracy:.0%}{spread} | {s.wrong_tables} | {s.pii_exposures} "
+            f"| `{s.arm}` | {s.accuracy:.0%}{spread} | {s.wrong_tables} | {s.decoy_reads} "
+            f"| {s.pii_exposures} "
             f"| {s.errors} | {s.mean_tool_calls:.1f} | {s.tokens:,} |"
         )
 

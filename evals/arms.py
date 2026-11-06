@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import duckdb
+import sqlglot
+from sqlglot import exp
 
 from warehouse_context_mcp.domain import Catalog
 from warehouse_context_mcp.server import INSTRUCTIONS, build_server
@@ -66,10 +68,32 @@ def open_arm(name: ArmName, database: Path, catalog: Path) -> Arm:
             return McpArm(database, catalog)
 
 
+_STRING = re.compile(r"'(?:[^']|'')*'")
+
+
 def tables_in(sql: str, known: Iterable[str]) -> frozenset[str]:
-    """Known table names mentioned in a query, matched as whole words."""
-    lowered = sql.lower()
-    return frozenset(t for t in known if re.search(rf"\b{re.escape(t)}\b", lowered))
+    """Known tables a query reads from.
+
+    Tables are taken from the parsed query, so a name inside a string literal (``WHERE
+    table_name = 'legacy_voyage_pnl'`` in an ``information_schema`` lookup) does not count.
+    SQL that does not parse falls back to whole-word matching with literals removed.
+    """
+    names = set(known)
+    try:
+        trees = sqlglot.parse(sql, dialect="duckdb")
+    except sqlglot.errors.SqlglotError:
+        trees = []
+    if trees and all(t is not None for t in trees):
+        found = {
+            table.name.lower()
+            for tree in trees
+            if tree is not None
+            for table in tree.find_all(exp.Table)
+            if not table.db or table.db.lower() == "main"
+        }
+        return frozenset(found & names)
+    lowered = _STRING.sub("''", sql.lower())
+    return frozenset(t for t in names if re.search(rf"\b{re.escape(t)}\b", lowered))
 
 
 class RawSqlArm:

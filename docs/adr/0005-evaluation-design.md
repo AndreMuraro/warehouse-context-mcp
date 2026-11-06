@@ -23,10 +23,16 @@ what, at what, and with which model.
   run against the same database at the start of a run. Answers go through a
   `submit_answer` tool and are scored by rule: first number within tolerance, name
   contained, yes/no prefix, or "no PII value disclosed". There is no LLM judge.
-- **Three metrics, not one.** Accuracy, wrong-table picks (the last query before the
-  answer read a decoy) and PII exposures (a PII value reached the model at all). The
-  last one counts tool results, not only answers: once a value is in a model's context
-  it has left the warehouse.
+- **Three metrics, not one.** Accuracy, wrong-table picks and PII exposures (a PII value
+  reached the model at all, in a tool result or the answer; once a value is in a model's
+  context it has left the warehouse). A wrong-table pick is a wrong answer from a run
+  whose successful queries selected from a decoy, with tables taken from the parsed SQL.
+  Reading a decoy is reported separately, because careful agents compare a decoy with the
+  governed table or rebuild the answer from the raw feed. The first definition, "the
+  last query before the answer read a decoy", flagged 11 correct Kimi K3 answers that
+  had only cross-checked a decoy or looked it up in `information_schema`; it was replaced
+  before any result was published, and `--rescore` recomputed the run from its
+  transcripts.
 - **Any model, over plain HTTP.** Two adapters, Anthropic Messages and OpenAI Chat
   Completions, cover the major providers and routers through presets, plus any compatible
   endpoint with `--base-url`. The client is `httpx2`, already a dependency of the MCP
@@ -35,6 +41,9 @@ what, at what, and with which model.
 - **The real server, in-process.** The `mcp` arm calls `MCPServer.call_tool`, which gives
   the agent the same schemas and result text a client receives, without spawning a
   process per question.
+- **Cheap to rerun.** `--jobs` answers questions in parallel, each worker with its own
+  connection; `--questions`, `--arms` and `--redo` run part of a suite into an existing
+  folder; `--rescore` changes the scoring without calling a model.
 - **Reproducible, resumable runs.** Each run gets a folder with its own database, the
   reference answers, every model response cached by request, records and transcripts.
   `--resume` replays cached calls for free; repeats salt the cache key so they are

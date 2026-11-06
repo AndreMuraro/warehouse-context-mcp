@@ -2,13 +2,19 @@
 
 ## [0.5.0] - Unreleased
 
+First results: Kimi K3 scored 92% with raw SQL, 95% with the catalog in the prompt and
+100% through the server, with 11, 3 and 0 runs exposing PII. See README > Evaluation.
+
 ### Added
 - Evaluation harness in `evals/`: 20 analyst questions over the demo warehouse, answered
   under three arms (raw SQL, raw SQL with the catalog in the prompt, this server) and
   scored for accuracy, wrong-table picks and PII exposures. Works with any Anthropic- or
   OpenAI-compatible API: presets for Anthropic, OpenAI, OpenRouter, Moonshot (Kimi), Groq,
   Together, Mistral, DeepSeek, Gemini and Ollama, or `--base-url`. Cached, resumable runs;
-  `--dry-run` needs no key. See ADR 0005.
+  `--jobs` for parallel questions, `--questions`/`--arms`/`--redo` to run part of a suite,
+  `--rescore` to recompute verdicts from transcripts; `--dry-run` needs no key. See ADR 0005.
+- `.env.example` lists the evaluation's provider keys, `SNOWFLAKE_STATEMENT_TIMEOUT_S` and
+  `DATABRICKS_ALLOW_CUSTOM_HOST`; a test keeps it in step with the settings.
 - `--dbt-manifest`: table and column docs, owners, grain, lineage, freshness and PII tags
   from a dbt `manifest.json`, layered between warehouse comments and the curated YAML.
 - `--audit-log`: an append-only JSON-lines record of every tool call (arguments, outcome,
