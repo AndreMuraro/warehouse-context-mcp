@@ -98,3 +98,40 @@ def test_losing_a_publish_race_keeps_the_winners_file(
     assert database.exists()
     assert catalog.exists()
     assert sorted(p.name for p in tmp_path.iterdir()) == ["catalog.yaml", "demo.duckdb"]
+
+
+def test_decoys_disagree_with_the_tables_they_shadow(warehouse: DuckDBWarehouse) -> None:
+    """The evaluation relies on these traps: a wrong table gives a wrong number."""
+
+    def one(sql: str) -> int:
+        value = warehouse.run(sql, 5).rows[0][0]
+        assert isinstance(value, int)
+        return value
+
+    assert one("select count(*) from raw_fixture_messages") > one(
+        "select count(*) from stg_voyages"
+    )
+    # The latest message per voyage is exactly the staged voyage.
+    assert (
+        one(
+            "select count(*) from stg_voyages s join ("
+            "  select voyage_id, arg_max(cargo_tonnes, received_at) tonnes"
+            "  from raw_fixture_messages group by 1) r using (voyage_id)"
+            " where r.tonnes <> s.cargo_tonnes"
+        )
+        == 0
+    )
+    assert one("select max(voyage_id) from legacy_voyage_pnl") < one(
+        "select max(voyage_id) from fct_voyage_economics"
+    )
+    assert (
+        one(
+            "select count(*) from legacy_voyage_pnl l join fct_voyage_economics f using (voyage_id)"
+            " where l.tce_usd_per_day = f.tce_usd_per_day"
+        )
+        == 0
+    )
+
+
+def test_legacy_table_is_stale(ctx: WarehouseContext) -> None:
+    assert ctx.freshness("legacy_voyage_pnl").status == "stale"

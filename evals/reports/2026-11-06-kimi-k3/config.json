@@ -1,0 +1,9 @@
+{
+  "label": "openrouter:kimi-k3",
+  "arms": [
+    "sql",
+    "sql+docs",
+    "mcp"
+  ],
+  "repeats": 3
+}

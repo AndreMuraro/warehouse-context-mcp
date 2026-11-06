@@ -25,7 +25,15 @@ def accepted(result: QueryAccepted | QueryRefused) -> QueryAccepted:
 
 def test_list_tables_includes_docs(ctx: WarehouseContext) -> None:
     tables = {t.table: t for t in ctx.list_tables()}
-    assert set(tables) == {"dim_charterers", "dim_vessels", "fct_voyage_economics", "stg_voyages"}
+    assert set(tables) == {
+        "dim_charterers",
+        "dim_vessels",
+        "fct_voyage_economics",
+        "legacy_voyage_pnl",
+        "raw_fixture_messages",
+        "stg_voyages",
+    }
+    assert tables["legacy_voyage_pnl"].description.startswith("DEPRECATED")
     assert tables["fct_voyage_economics"].owner == "freight-analytics"
 
 
@@ -47,10 +55,11 @@ def test_unknown_tables_raise(ctx: WarehouseContext, call: str) -> None:
 
 def test_lineage_walks_both_directions(ctx: WarehouseContext) -> None:
     lin = ctx.lineage("stg_voyages")
-    assert lin.upstream == ["dim_vessels", "dim_charterers"]
+    assert lin.upstream == ["raw_fixture_messages", "dim_vessels", "dim_charterers"]
     assert lin.downstream == ["fct_voyage_economics"]
     assert ctx.lineage("fct_voyage_economics").upstream == [
         "stg_voyages",
+        "raw_fixture_messages",
         "dim_vessels",
         "dim_charterers",
     ]

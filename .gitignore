@@ -12,3 +12,6 @@ dist/
 *.p8
 snowflake_key.pub
 .secrets/
+
+# Evaluation runs: databases, cached model responses and transcripts
+evals/results/

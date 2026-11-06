@@ -59,3 +59,20 @@ def test_plugin_pins_the_released_server() -> None:
     server = json.loads((PLUGIN / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
     # An exact PyPI release: installing the plugin never runs unreleased code.
     assert f"warehouse-context-mcp=={PROJECT['version']}" in server["warehouse"]["args"]
+
+
+def test_env_example_lists_every_setting() -> None:
+    """A new setting or provider key cannot ship without a line in .env.example."""
+    from evals.providers import PRESETS  # noqa: PLC0415  the eval harness is a dev tool
+
+    from warehouse_context_mcp.settings import DatabricksSettings, SnowflakeSettings  # noqa: PLC0415
+
+    example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    names = set(re.findall(r"^#?\s*([A-Z][A-Z0-9_]+)=", example, re.MULTILINE))
+    expected = {p.key_env for p in PRESETS.values() if p.key_env} | {"WCM_DEMO_DIR"}
+    for settings in (SnowflakeSettings, DatabricksSettings):
+        prefix = settings.model_config.get("env_prefix", "")
+        for name, field in settings.model_fields.items():
+            alias = field.validation_alias
+            expected.add(alias if isinstance(alias, str) else f"{prefix}{name}".upper())
+    assert expected <= names, sorted(expected - names)
