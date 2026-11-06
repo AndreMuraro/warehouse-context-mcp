@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.5.0] - Unreleased
+## [0.5.0] - 2026-11-05
 
 First results: Kimi K3 scored 92% with raw SQL, 95% with the catalog in the prompt and
 100% through the server, with 11, 3 and 0 runs exposing PII. See README > Evaluation.
