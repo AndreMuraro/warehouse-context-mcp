@@ -239,7 +239,13 @@ class QueryPolicy:
         Only when the name cannot also mean a column of a table in that query: engines
         bind such a name, at least inside expressions, to the table column, so
         ``SELECT id AS email ... ORDER BY email LIKE 'a%'`` would sort by the real
-        ``email``. sqlglot reads it as the alias, so ambiguity is refused outright.
+        ``email``. sqlglot reads it as the alias, so ambiguity is refused.
+
+        The exception is an output that *is* that column: in ``SELECT country ... ORDER BY
+        country`` (or ``ORDER BY 1``, which qualification turns into the name) both
+        readings are ``t.country``, provided no other table in the query has a column of
+        that name. PII columns never qualify: their outputs are masked before this check,
+        and they are refused here as well.
         """
         order = column.find_ancestor(exp.Order, exp.Select)
         if not isinstance(order, exp.Order):
@@ -251,10 +257,30 @@ class QueryPolicy:
         if scope is None:
             return False
         name = column.name.lower()
-        for source in scope.sources.values():
-            if isinstance(source, exp.Table) and name in (self.columns(source.name.lower()) or {}):
-                return False
-        return True
+        owners = [
+            (alias, source)
+            for alias, source in scope.sources.items()
+            if isinstance(source, exp.Table) and name in (self.columns(source.name.lower()) or {})
+        ]
+        if not owners:
+            return True
+        return len(owners) == 1 and self._output_is_its_column(query, name, *owners[0])
+
+    def _output_is_its_column(
+        self, query: exp.Query, name: str, alias: str, source: exp.Table
+    ) -> bool:
+        """The one output called ``name`` is the non-PII column ``alias.name`` itself."""
+        if name in self.pii.get(source.name.lower(), frozenset()):
+            return False
+        outputs = [s for s in query.selects if s.alias_or_name.lower() == name]
+        if len(outputs) != 1:
+            return False
+        value = outputs[0].this if isinstance(outputs[0], exp.Alias) else outputs[0]
+        return (
+            isinstance(value, exp.Column)
+            and value.name.lower() == name
+            and value.table.lower() == alias.lower()
+        )
 
     # -- helpers ------------------------------------------------------------------------
 

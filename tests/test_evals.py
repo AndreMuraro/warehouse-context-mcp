@@ -401,10 +401,10 @@ def test_dry_run_end_to_end(tmp_path: Path, capsys: pytest.CaptureFixture[str]) 
     assert len(records) == 60
     missed = {r["question_id"] for r in records if r["arm"] == "mcp" and not r["correct"]}
     # The scripted agent sends each reference query verbatim and never repairs a refusal.
-    # These are refused by the v0.4.1 query policy: ORDER BY on a name that is both an
-    # output and a column (q06, q09, q15), and AT TIME ZONE (q16). A real agent repairs
-    # the first kind and answers q16 with table_freshness.
-    assert missed == {"q06", "q09", "q15", "q16"}
+    # q16 uses AT TIME ZONE, which the query policy does not allow; a real agent answers it
+    # with table_freshness. (Until v0.5.1, ORDER BY on an output that is its own column
+    # also refused q06, q09 and q15.)
+    assert missed == {"q16"}
     assert not any(r["pii_exposed"] for r in records)
     assert (run / "results.md").exists()
 

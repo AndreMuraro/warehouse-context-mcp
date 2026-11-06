@@ -318,7 +318,7 @@ CI runs the same on Python 3.14 and 3.15 (Linux) and 3.14 (Windows), and builds 
 - [x] v0.3: Python 3.14+, uv, ruff and ty; layered package; typed tool inputs and outputs; table names qualified by the policy
 - [x] v0.4: Streamable HTTP transport, hardened container image and Compose setup, Snowflake CLI connections, zero-setup `--demo`, client configs, PyPI and MCP Registry release pipeline
 - [x] v0.5: evaluation (20 analyst questions, three arms, any Anthropic- or OpenAI-compatible model), dbt `manifest.json` import, append-only audit log
-- [ ] Fewer false refusals: `ORDER BY` on an output that is the same column it shadows (found by the evaluation)
+- [x] v0.5.1: `ORDER BY` on an output that is its own column is no longer refused (found by the evaluation)
 
 ## License
 

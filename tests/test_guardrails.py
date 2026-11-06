@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from warehouse_context_mcp.domain import Namespace, QueryRejectedError
+from warehouse_context_mcp.domain import Namespace, QueryAccepted, QueryRefused, QueryRejectedError
 from warehouse_context_mcp.guardrails import (
     MASK,
     TRUNCATED,
@@ -15,6 +15,7 @@ from warehouse_context_mcp.guardrails import (
     mask_rows,
     to_cell,
 )
+from warehouse_context_mcp.service import WarehouseContext
 
 COLUMNS: dict[str, Mapping[str, str]] = {
     "dim_vessels": {"vessel_id": "INT", "vessel_name": "VARCHAR", "vessel_class": "VARCHAR"},
@@ -224,3 +225,50 @@ def test_total_result_size_is_bounded() -> None:
 )
 def test_cells_are_json_safe(value: object, expected: object) -> None:
     assert to_cell(value) == expected
+
+
+SAME_COLUMN_ORDER = [
+    "select country from dim_charterers group by country order by country",
+    "select country, count(*) as n from dim_charterers group by 1 order by count(*) desc, country",
+    "select country, count(*) as n from dim_charterers group by 1 order by 2 desc, 1",
+    "select c.country as country from dim_charterers c order by country",
+    "select country from dim_charterers order by country like 'A%' desc, country",
+    (
+        "select c.charterer_name, count(*) as n from stg_voyages s "
+        "join dim_charterers c using (charterer_id) group by 1 order by n desc, c.charterer_name"
+    ),
+    (
+        "select load_port || ' to ' || discharge_port as route from stg_voyages "
+        "group by load_port, discharge_port order by count(*) desc, 1 limit 1"
+    ),
+]
+
+
+@pytest.mark.parametrize("sql", SAME_COLUMN_ORDER)
+def test_ordering_by_an_output_that_is_its_own_column(ctx: WarehouseContext, sql: str) -> None:
+    """Common model-written SQL; found refused by the v0.5 evaluation.
+
+    Both readings of the name are the same column, so the result must equal what the
+    engine returns for the original query.
+    """
+    result = ctx.query(sql)
+    assert isinstance(result, QueryAccepted), result
+    expected = ctx.warehouse.run(sql, 5)
+    assert [tuple(r.values()) for r in result.rows] == [tuple(r) for r in expected.rows]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # Two tables have the column, so the name is ambiguous between them.
+        (
+            "select s.vessel_id from stg_voyages s join dim_vessels v using (vessel_id) "
+            "order by vessel_id"
+        ),
+        # The output with that name is not the column.
+        "select country, upper(country) as country from dim_charterers order by country",
+        "select upper(country) as country from dim_charterers order by country like 'A%'",
+    ],
+)
+def test_ordering_stays_refused_when_the_readings_differ(ctx: WarehouseContext, sql: str) -> None:
+    assert isinstance(ctx.query(sql), QueryRefused)
