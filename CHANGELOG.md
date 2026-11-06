@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.1] - Unreleased
+
+### Fixed
+- `ORDER BY` on an output that is the same column as its name is no longer refused:
+  `SELECT country ... ORDER BY country`, `ORDER BY 1`, `ORDER BY t.country` and
+  expressions over it. Both readings of the name are that one column, provided no other
+  table in the query has a column of that name and it is not PII. Found by the
+  evaluation: it refused 3 of the 20 reference queries, and 3 of Kimi K3's 80 server
+  queries before it rewrote them. Every attack query from both reviews stays refused, plus
+  five new variants of the exception.
+
 ## [0.5.0] - 2026-11-05
 
 First results: Kimi K3 scored 92% with raw SQL, 95% with the catalog in the prompt and

@@ -1,7 +1,7 @@
 {
   "name": "warehouse-context",
   "description": "Governed, read-only warehouse context for Claude: the MCP server (bundled demo warehouse) plus a skill for using it well.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "author": { "name": "André Muraro" },
   "homepage": "https://github.com/AndreMuraro/warehouse-context-mcp",
   "repository": "https://github.com/AndreMuraro/warehouse-context-mcp",

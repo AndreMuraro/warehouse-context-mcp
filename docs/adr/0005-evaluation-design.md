@@ -59,7 +59,8 @@ what, at what, and with which model.
   same column (`SELECT country ... ORDER BY country`, or `ORDER BY 1`). The rule exists
   to stop an alias from shadowing a PII column in the sort, but it also catches the most
   common shape of model-written SQL. Agents can repair the query from the error, which
-  costs turns; narrowing the rule is tracked on the roadmap.
+  costs turns. v0.5.1 narrows the rule: an output that is the same column as its name can
+  be ordered by, since both readings are that column.
 - Results depend on the model and vary between runs. The README reports the model, the
   date and the range over repeats, never a single best run.
 - The demo is small and the decoys were designed by the author. The question file is
